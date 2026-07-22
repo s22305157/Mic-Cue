@@ -11,6 +11,8 @@ let currentLineIndex = 0
 let mode: 'rehearsal' | 'stage' = 'rehearsal'
 let isLocked = state.settings.stageLockOnEntry
 let playbackStatus: SpeechStatus = 'stopped'
+let isContinuousPlaying = false
+
 const speaker = new Speaker()
 const app = document.querySelector<HTMLDivElement>('#app')!
 const live = document.querySelector<HTMLDivElement>('#live-status')!
@@ -19,6 +21,29 @@ speaker.onStatusChange = (status, message) => {
   playbackStatus = status
   announce(message)
   render()
+}
+
+speaker.onEnd = () => {
+  if (isContinuousPlaying || state.settings.autoAdvance) {
+    const script = selectedScript()
+    if (script && currentLineIndex < script.lines.length - 1) {
+      currentLineIndex++
+      render()
+      scrollToActiveLine()
+      const line = selectedLine()
+      if (line) {
+        window.setTimeout(() => {
+          if (playbackStatus === 'stopped' || isContinuousPlaying || state.settings.autoAdvance) {
+            speaker.speak(line.text, state.settings.voiceURI, state.settings.rate, state.settings.pitch)
+          }
+        }, 250)
+      }
+    } else {
+      isContinuousPlaying = false
+      announce('全劇朗讀完成。')
+      render()
+    }
+  }
 }
 
 function announce(message: string): void {
@@ -53,6 +78,13 @@ function icon(name: string): string {
   return icons[name] ?? ''
 }
 
+function scrollToActiveLine(): void {
+  window.requestAnimationFrame(() => {
+    const activeCard = app.querySelector<HTMLElement>('.line-card.active')
+    activeCard?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  })
+}
+
 function render(): void {
   const script = selectedScript()
   if (!script && state.scripts.length) state.selectedScriptId = state.scripts[0].id
@@ -69,9 +101,11 @@ function rehearsalTemplate(script: Script | undefined, current: CueLine | undefi
     <li><button class="script-item ${item.id === state.selectedScriptId ? 'selected' : ''}" data-action="select-script" data-id="${item.id}" aria-current="${item.id === state.selectedScriptId}">
       <span>${escapeHtml(item.title)}</span><small>${item.lines.length} 句</small>
     </button></li>`).join('')
+  
   const lines = script?.lines.map((line, index) => `
-    <li class="line-card ${index === currentLineIndex ? 'active' : ''}">
-      <button class="line-select" data-action="select-line" data-index="${index}" aria-label="選取第 ${index + 1} 句">${index + 1}</button>
+    <li class="line-card ${index === currentLineIndex ? 'active' : ''}" data-line-index="${index}">
+      <button class="line-select" data-action="select-line" data-index="${index}" title="選取並跳轉至第 ${index + 1} 句" aria-label="選取第 ${index + 1} 句">${index + 1}</button>
+      <button class="line-play-btn" data-action="play-line" data-index="${index}" title="從第 ${index + 1} 句開始播放" aria-label="播放第 ${index + 1} 句">${icon('play')}</button>
       <textarea data-line-id="${line.id}" aria-label="第 ${index + 1} 句台詞">${escapeHtml(line.text)}</textarea>
       <div class="line-actions">
         <button data-action="move-line" data-index="${index}" data-direction="-1" ${index === 0 ? 'disabled' : ''} aria-label="上移台詞">${icon('up')}</button>
@@ -79,26 +113,60 @@ function rehearsalTemplate(script: Script | undefined, current: CueLine | undefi
         <button data-action="delete-line" data-index="${index}" aria-label="刪除台詞">${icon('delete')}</button>
       </div>
     </li>`).join('') ?? ''
+
   return `
     <header class="topbar"><div><h1>Mic Cue</h1><p>文字轉語音提示卡</p></div><div class="top-actions"><button data-action="export">匯出 JSON</button><label class="button-like">匯入 JSON<input id="import-file" type="file" accept="application/json" hidden></label><button class="primary" data-action="enter-stage">進入舞台模式</button></div></header>
     <main id="main-content" class="layout">
       <aside class="sidebar" aria-label="腳本列表"><div class="sidebar-head"><h2>腳本</h2><button data-action="new-script" aria-label="建立腳本">＋</button></div><ul>${scriptItems}</ul></aside>
       <section class="editor" aria-label="腳本編輯器">
-        ${script ? `<div class="script-title-row"><label>腳本名稱<input id="script-title" value="${escapeHtml(script.title)}"></label><button class="danger" data-action="delete-script">刪除腳本</button></div>
-        <div class="editor-heading"><h2>台詞</h2><button data-action="add-line">新增台詞</button></div><ol class="line-list">${lines || '<li class="empty">尚無台詞，請新增一行。</li>'}</ol>` : '<p class="empty">建立一份腳本開始使用。</p>'}
+        ${script ? `
+          <div class="script-title-row"><label>腳本名稱<input id="script-title" value="${escapeHtml(script.title)}"></label><button class="danger" data-action="delete-script">刪除腳本</button></div>
+          <div class="editor-heading">
+            <h2>台詞 <small style="font-size:0.85rem; color:#655d72; font-weight:normal;">(共 ${script.lines.length} 句)</small></h2>
+            <div class="editor-heading-right">
+              ${script.lines.length > 0 ? `
+                <select class="quick-jump-select" id="quick-jump-select" aria-label="快速跳轉至指定台詞">
+                  <option value="">🎯 快速跳至台詞...</option>
+                  ${script.lines.map((line, idx) => `<option value="${idx}" ${idx === currentLineIndex ? 'selected' : ''}>第 ${idx + 1} 句: ${escapeHtml(line.text.slice(0, 18))}${line.text.length > 18 ? '...' : ''}</option>`).join('')}
+                </select>
+              ` : ''}
+              <button data-action="add-line">新增台詞</button>
+            </div>
+          </div>
+          ${script.lines.length > 0 ? `
+            <div class="quick-jump-bar">
+              <span>快速跳轉：</span>
+              <button data-action="jump-first" ${currentLineIndex === 0 ? 'disabled' : ''}>⏮ 第一句</button>
+              <button data-action="previous" ${currentLineIndex === 0 ? 'disabled' : ''}>◀ 上一句</button>
+              <button data-action="next" ${currentLineIndex === (script.lines.length - 1) ? 'disabled' : ''}>下一句 ▶</button>
+              <button data-action="jump-last" ${currentLineIndex === (script.lines.length - 1) ? 'disabled' : ''}>⏭ 最後一句</button>
+              ${isContinuousPlaying ? '<span class="continuous-mode-badge">⚡ 連續朗讀中</span>' : ''}
+            </div>
+          ` : ''}
+          <ol class="line-list">${lines || '<li class="empty">尚無台詞，請新增一行。</li>'}</ol>
+        ` : '<p class="empty">建立一份腳本開始使用。</p>'}
       </section>
       <aside class="controls" aria-label="播放及設定">
-        <section><h2>排練模式</h2><p class="now-playing">${playbackStatus === 'playing' ? '正在播放' : '準備就緒'}：${escapeHtml(current?.text || '未選取台詞')}</p>
-          <div class="control-grid"><button class="primary" data-action="play">${icon('play')} 播放</button><button data-action="stop">${icon('stop')} 停止</button><button data-action="replay">${icon('replay')} 重播</button><button data-action="previous">${icon('previous')} 上一句</button><button data-action="next">下一句 ${icon('next')}</button></div>
+        <section><h2>排練模式</h2>
+          <p class="now-playing">${playbackStatus === 'playing' ? (isContinuousPlaying ? '⚡ 連續播放中' : '正在播放') : '準備就緒'}：${escapeHtml(current?.text || '未選取台詞')}</p>
+          <div class="control-grid">
+            <button class="primary" data-action="play">${icon('play')} 播放單句</button>
+            <button class="primary" style="background:#00897b;" data-action="play-continuous">${icon('play')} 全劇連播</button>
+            <button data-action="stop">${icon('stop')} 停止</button>
+            <button data-action="replay">${icon('replay')} 重播</button>
+            <button data-action="previous">${icon('previous')} 上一句</button>
+            <button data-action="next">下一句 ${icon('next')}</button>
+          </div>
         </section>
         <section><h2>語音設定</h2><label>語音<select id="voice-select"><option value="">系統預設</option>${speaker.voices.map((voice) => `<option value="${escapeHtml(voice.voiceURI)}" ${voice.voiceURI === state.settings.voiceURI ? 'selected' : ''}>${escapeHtml(voice.name)} (${voice.lang})</option>`).join('')}</select></label>
           <label>語速 <output>${state.settings.rate.toFixed(1)}×</output><input id="rate" type="range" min="0.5" max="2" step="0.1" value="${state.settings.rate}"></label>
           <label>音調 <output>${state.settings.pitch.toFixed(1)}</output><input id="pitch" type="range" min="0.5" max="2" step="0.1" value="${state.settings.pitch}"></label>
           <label>文字大小 <output>${state.settings.fontScale.toFixed(1)}×</output><input id="font-scale" type="range" min="0.8" max="1.6" step="0.1" value="${state.settings.fontScale}"></label>
+          <label class="checkbox"><input id="auto-advance" type="checkbox" ${state.settings.autoAdvance ? 'checked' : ''}> 啟用連續朗讀模式 (單句播放完自動接續下一句)</label>
           <label class="checkbox"><input id="lock-on-entry" type="checkbox" ${state.settings.stageLockOnEntry ? 'checked' : ''}> 進入舞台模式時啟用 Stage Lock</label>
         </section>
         <section><h2>常用救援句</h2><ul class="rescue-list">${state.settings.rescuePhrases.map((phrase, index) => `<li><button data-action="speak-rescue" data-index="${index}">${escapeHtml(phrase)}</button><button data-action="delete-rescue" data-index="${index}" aria-label="刪除救援句">×</button></li>`).join('')}</ul><button data-action="add-rescue">新增救援句</button></section>
-        <p class="shortcut-help">快捷鍵：空白鍵播放／重播，← 上一句，→ 下一句，S 停止，L 鎖定舞台。</p>
+        <p class="shortcut-help">快捷鍵：空白鍵播放／重播，Home / End 跳至首尾句，← 上一句，→ 下一句，S 停止，L 鎖定舞台。</p>
       </aside>
     </main>`
 }
@@ -123,12 +191,27 @@ function wireEvents(): void {
   }))
   const title = app.querySelector<HTMLInputElement>('#script-title')
   title?.addEventListener('change', () => { const script = selectedScript(); if (script) { script.title = title.value.trim() || '未命名腳本'; script.updatedAt = new Date().toISOString(); persist(); render() } })
+  
+  const quickJumpSelect = app.querySelector<HTMLSelectElement>('#quick-jump-select')
+  quickJumpSelect?.addEventListener('change', () => {
+    if (quickJumpSelect.value !== '') {
+      currentLineIndex = Number(quickJumpSelect.value)
+      render()
+      scrollToActiveLine()
+    }
+  })
+
   bindSetting('voice-select', (value) => { state.settings.voiceURI = value })
   bindSetting('rate', (value) => { state.settings.rate = Number(value) })
   bindSetting('pitch', (value) => { state.settings.pitch = Number(value) })
   bindSetting('font-scale', (value) => { state.settings.fontScale = Number(value) })
+  
+  const autoAdvance = app.querySelector<HTMLInputElement>('#auto-advance')
+  autoAdvance?.addEventListener('change', () => { state.settings.autoAdvance = autoAdvance.checked; persist(); render() })
+
   const lockOnEntry = app.querySelector<HTMLInputElement>('#lock-on-entry')
   lockOnEntry?.addEventListener('change', () => { state.settings.stageLockOnEntry = lockOnEntry.checked; persist() })
+  
   app.querySelector<HTMLInputElement>('#import-file')?.addEventListener('change', importJson)
 }
 
@@ -141,17 +224,22 @@ function handleAction(element: HTMLElement): void {
   const action = element.dataset.action
   const script = selectedScript()
   const index = Number(element.dataset.index)
+
   if (action === 'new-script') { const id = makeId(); state.scripts.unshift({ id, title: '未命名腳本', lines: [], updatedAt: new Date().toISOString() }); state.selectedScriptId = id; currentLineIndex = 0; persist(); render(); return }
   if (action === 'select-script') { state.selectedScriptId = element.dataset.id ?? null; currentLineIndex = 0; persist(); render(); return }
   if (action === 'delete-script' && script && confirm(`刪除「${script.title}」？`)) { state.scripts = state.scripts.filter((item) => item.id !== script.id); state.selectedScriptId = state.scripts[0]?.id ?? null; currentLineIndex = 0; persist(); render(); return }
-  if (action === 'add-line' && script) { script.lines.push({ id: makeId(), text: '' }); currentLineIndex = script.lines.length - 1; persist(); render(); return }
-  if (action === 'select-line') { currentLineIndex = index; render(); return }
+  if (action === 'add-line' && script) { script.lines.push({ id: makeId(), text: '' }); currentLineIndex = script.lines.length - 1; persist(); render(); scrollToActiveLine(); return }
+  if (action === 'select-line') { currentLineIndex = index; render(); scrollToActiveLine(); return }
+  if (action === 'play-line') { currentLineIndex = index; render(); scrollToActiveLine(); const line = selectedLine(); if (line) speaker.speak(line.text, state.settings.voiceURI, state.settings.rate, state.settings.pitch); return }
+  if (action === 'jump-first') { currentLineIndex = 0; render(); scrollToActiveLine(); return }
+  if (action === 'jump-last' && script) { currentLineIndex = Math.max(0, script.lines.length - 1); render(); scrollToActiveLine(); return }
   if (action === 'delete-line' && script) { script.lines.splice(index, 1); currentLineIndex = Math.max(0, Math.min(currentLineIndex, script.lines.length - 1)); persist(); render(); return }
-  if (action === 'move-line' && script) { const target = index + Number(element.dataset.direction); if (target >= 0 && target < script.lines.length) [script.lines[index], script.lines[target]] = [script.lines[target], script.lines[index]]; currentLineIndex = target; persist(); render(); return }
-  if (action === 'play' || action === 'replay') { const line = selectedLine(); if (line) speaker.speak(line.text, state.settings.voiceURI, state.settings.rate, state.settings.pitch); return }
-  if (action === 'stop') { speaker.stop(); return }
-  if (action === 'previous') { currentLineIndex = Math.max(0, currentLineIndex - 1); render(); return }
-  if (action === 'next') { currentLineIndex = Math.min(Math.max(0, (script?.lines.length ?? 1) - 1), currentLineIndex + 1); render(); return }
+  if (action === 'move-line' && script) { const target = index + Number(element.dataset.direction); if (target >= 0 && target < script.lines.length) [script.lines[index], script.lines[target]] = [script.lines[target], script.lines[index]]; currentLineIndex = target; persist(); render(); scrollToActiveLine(); return }
+  if (action === 'play' || action === 'replay') { isContinuousPlaying = false; const line = selectedLine(); if (line) speaker.speak(line.text, state.settings.voiceURI, state.settings.rate, state.settings.pitch); return }
+  if (action === 'play-continuous') { isContinuousPlaying = true; render(); const line = selectedLine(); if (line) speaker.speak(line.text, state.settings.voiceURI, state.settings.rate, state.settings.pitch); return }
+  if (action === 'stop') { isContinuousPlaying = false; speaker.stop(); render(); return }
+  if (action === 'previous') { currentLineIndex = Math.max(0, currentLineIndex - 1); render(); scrollToActiveLine(); return }
+  if (action === 'next') { currentLineIndex = Math.min(Math.max(0, (script?.lines.length ?? 1) - 1), currentLineIndex + 1); render(); scrollToActiveLine(); return }
   if (action === 'enter-stage') { mode = 'stage'; isLocked = state.settings.stageLockOnEntry; speaker.stop(false); render(); return }
   if (action === 'exit-stage') { mode = 'rehearsal'; speaker.stop(false); render(); return }
   if (action === 'toggle-lock') { isLocked = !isLocked; announce(isLocked ? '舞台控制已鎖定。' : '舞台控制已解鎖。'); render(); return }
@@ -182,11 +270,16 @@ async function importJson(event: Event): Promise<void> {
 document.addEventListener('keydown', (event) => {
   if ((event.target as HTMLElement).matches('input, textarea, select')) return
   if (event.key === ' ' || event.key === 'Enter') { event.preventDefault(); const line = selectedLine(); if (line && !isLocked) speaker.speak(line.text, state.settings.voiceURI, state.settings.rate, state.settings.pitch) }
-  if (event.key === 'ArrowLeft' && !isLocked) { currentLineIndex = Math.max(0, currentLineIndex - 1); render() }
-  if (event.key === 'ArrowRight' && !isLocked) { const count = selectedScript()?.lines.length ?? 0; currentLineIndex = Math.min(Math.max(0, count - 1), currentLineIndex + 1); render() }
-  if (event.key.toLowerCase() === 's') speaker.stop()
+  if (event.key === 'Home' && !isLocked) { currentLineIndex = 0; render(); scrollToActiveLine() }
+  if (event.key === 'End' && !isLocked) { const count = selectedScript()?.lines.length ?? 0; currentLineIndex = Math.max(0, count - 1); render(); scrollToActiveLine() }
+  if (event.key === 'PageUp' && !isLocked) { currentLineIndex = Math.max(0, currentLineIndex - 5); render(); scrollToActiveLine() }
+  if (event.key === 'PageDown' && !isLocked) { const count = selectedScript()?.lines.length ?? 0; currentLineIndex = Math.min(Math.max(0, count - 1), currentLineIndex + 5); render(); scrollToActiveLine() }
+  if (event.key === 'ArrowLeft' && !isLocked) { currentLineIndex = Math.max(0, currentLineIndex - 1); render(); scrollToActiveLine() }
+  if (event.key === 'ArrowRight' && !isLocked) { const count = selectedScript()?.lines.length ?? 0; currentLineIndex = Math.min(Math.max(0, count - 1), currentLineIndex + 1); render(); scrollToActiveLine() }
+  if (event.key.toLowerCase() === 's') { isContinuousPlaying = false; speaker.stop(); render() }
   if (event.key.toLowerCase() === 'l' && mode === 'stage') { isLocked = !isLocked; render() }
 })
 
 speechSynthesis.addEventListener('voiceschanged', render)
 render()
+

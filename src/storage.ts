@@ -15,6 +15,7 @@ export const defaultSettings: Settings = {
   pitch: 1,
   fontScale: 1,
   stageLockOnEntry: false,
+  autoAdvance: false,
   rescuePhrases: ['請給我一秒鐘。', '我想換個方式表達。', '謝謝大家耐心等我。']
 }
 
@@ -83,6 +84,7 @@ function sanitizeSettings(value: unknown): Settings | null {
     pitch: clampNumber(candidate.pitch, MIN_PITCH, MAX_PITCH, defaultSettings.pitch),
     fontScale: clampNumber(candidate.fontScale, MIN_FONT_SCALE, MAX_FONT_SCALE, defaultSettings.fontScale),
     stageLockOnEntry: isBoolean(candidate.stageLockOnEntry) ? candidate.stageLockOnEntry : defaultSettings.stageLockOnEntry,
+    autoAdvance: isBoolean(candidate.autoAdvance) ? candidate.autoAdvance : defaultSettings.autoAdvance,
     rescuePhrases: rescuePhrases.length ? rescuePhrases : [...defaultSettings.rescuePhrases]
   }
 }

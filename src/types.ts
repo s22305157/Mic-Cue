@@ -16,6 +16,7 @@ export interface Settings {
   pitch: number
   fontScale: number
   stageLockOnEntry: boolean
+  autoAdvance: boolean
   rescuePhrases: string[]
 }
 
