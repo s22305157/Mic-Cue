@@ -15,7 +15,7 @@ public struct AppSettings: Codable, Equatable {
         defaultRate: Float = 0.5,
         defaultPitch: Float = 1.0,
         fontSizeScale: Double = 1.2,
-        isStageModeLockEnabled: Bool = true,
+        isStageModeLockEnabled: Bool = false,
         isVoiceOverFriendly: Bool = true,
         isLandscapeOnly: Bool = false
     ) {

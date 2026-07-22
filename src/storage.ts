@@ -14,7 +14,7 @@ export const defaultSettings: Settings = {
   rate: 1,
   pitch: 1,
   fontScale: 1,
-  stageLockOnEntry: true,
+  stageLockOnEntry: false,
   rescuePhrases: ['請給我一秒鐘。', '我想換個方式表達。', '謝謝大家耐心等我。']
 }
 
