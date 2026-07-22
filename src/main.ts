@@ -1,8 +1,8 @@
 import './styles.css'
 import { registerSW } from 'virtual:pwa-register'
-import { loadState, makeId, saveState, validateImportedState } from './storage'
+import { calculateBackupDiff, createScriptSnapshot, loadState, makeId, recordScriptHistory, saveState, validateImportedState } from './storage'
 import { Speaker, type SpeechStatus } from './speech'
-import type { AppState, CueLine, Script } from './types'
+import type { AppState, BackupDiffSummary, CueLine, Script, ScriptRevision } from './types'
 
 registerSW({ immediate: true })
 
@@ -12,6 +12,12 @@ let mode: 'rehearsal' | 'stage' = 'rehearsal'
 let isLocked = state.settings.stageLockOnEntry
 let playbackStatus: SpeechStatus = 'stopped'
 let isContinuousPlaying = false
+
+let isStageJumpModalOpen = false
+let isImportPreviewModalOpen = false
+let pendingImportState: AppState | null = null
+let pendingImportDiff: BackupDiffSummary | null = null
+let isScriptHistoryModalOpen = false
 
 const speaker = new Speaker()
 const app = document.querySelector<HTMLDivElement>('#app')!
@@ -134,7 +140,7 @@ function rehearsalTemplate(script: Script | undefined, current: CueLine | undefi
     </li>`).join('') ?? ''
 
   return `
-    <header class="topbar"><div><h1>Mic Cue</h1><p>文字轉語音提示卡</p></div><div class="top-actions"><button data-action="export">匯出 JSON</button><label class="button-like">匯入 JSON<input id="import-file" type="file" accept="application/json" hidden></label><button class="primary" data-action="enter-stage">進入舞台模式</button></div></header>
+    <header class="topbar"><div><h1>Mic Cue</h1><p>文字轉語音提示卡</p></div><div class="top-actions"><button data-action="export">匯出 JSON 備份</button><label class="button-like">匯入 JSON 備份<input id="import-file" type="file" accept="application/json" hidden></label><button class="primary" data-action="enter-stage">進入舞台模式</button></div></header>
     <main id="main-content" class="layout">
       <aside class="sidebar" aria-label="腳本列表"><div class="sidebar-head"><h2>腳本</h2><button data-action="new-script" aria-label="建立腳本">＋</button></div><ul>${scriptItems}</ul></aside>
       <section class="editor" aria-label="腳本編輯器">
@@ -143,6 +149,7 @@ function rehearsalTemplate(script: Script | undefined, current: CueLine | undefi
           <div class="editor-heading">
             <h2>台詞 <small style="font-size:0.85rem; color:#655d72; font-weight:normal;">(共 ${script.lines.length} 句)</small></h2>
             <div class="editor-heading-right">
+              <button data-action="open-script-history" title="檢視此腳本的版本歷史快照與回復上一版" aria-label="腳本版本歷史">📜 版本歷史 (${script.history?.length ?? 0})</button>
               ${script.lines.length > 0 ? `
                 <select class="quick-jump-select" id="quick-jump-select" aria-label="快速跳轉至指定台詞">
                   <option value="">🎯 快速跳至台詞...</option>
@@ -157,15 +164,14 @@ function rehearsalTemplate(script: Script | undefined, current: CueLine | undefi
               <span>快速跳轉：</span>
               <button data-action="jump-first" ${currentLineIndex === 0 ? 'disabled' : ''}>⏮ 第一句</button>
               <button data-action="previous" ${currentLineIndex === 0 ? 'disabled' : ''}>◀ 上一句</button>
-              <button data-action="next" ${currentLineIndex === (script.lines.length - 1) ? 'disabled' : ''}>下一句 ▶</button>
-              <button data-action="jump-last" ${currentLineIndex === (script.lines.length - 1) ? 'disabled' : ''}>⏭ 最後一句</button>
-              ${isContinuousPlaying ? '<span class="continuous-mode-badge">⚡ 連續朗讀中</span>' : ''}
+              <button data-action="next" ${currentLineIndex >= script.lines.length - 1 ? 'disabled' : ''}>下一句 ▶</button>
+              <button data-action="jump-last" ${currentLineIndex >= script.lines.length - 1 ? 'disabled' : ''}>⏭ 最後一句</button>
             </div>
           ` : ''}
-          <ol class="line-list">${lines || '<li class="empty">尚無台詞，請新增一行。</li>'}</ol>
-        ` : '<p class="empty">建立一份腳本開始使用。</p>'}
+          <ul class="line-list">${lines || '<li class="empty">尚無台詞，請新增一行。</li>'}</ul>
+        ` : '<div class="empty">請在左側選擇或新增腳本</div>'}
       </section>
-      <aside class="controls" aria-label="播放及設定">
+      <aside class="controls" aria-label="控制區與設定">
         <section><h2>排練模式</h2>
           <p class="now-playing">${playbackStatus === 'playing' ? (isContinuousPlaying ? '⚡ 連續播放中' : '正在播放') : '準備就緒'}：${escapeHtml(current?.text || '未選取台詞')}</p>
           <div class="control-grid">
@@ -187,10 +193,112 @@ function rehearsalTemplate(script: Script | undefined, current: CueLine | undefi
         <section><h2>常用救援句</h2><ul class="rescue-list">${state.settings.rescuePhrases.map((phrase, index) => `<li><button data-action="speak-rescue" data-index="${index}">${escapeHtml(phrase)}</button><button data-action="delete-rescue" data-index="${index}" aria-label="刪除救援句">×</button></li>`).join('')}</ul><button data-action="add-rescue">新增救援句</button></section>
         <p class="shortcut-help">快捷鍵：空白鍵播放／重播，Home / End 跳至首尾句，← 上一句，→ 下一句，S 停止，L 鎖定舞台。</p>
       </aside>
+
+      ${isImportPreviewModalOpen ? importPreviewModalTemplate() : ''}
+      ${isScriptHistoryModalOpen ? scriptHistoryModalTemplate(script) : ''}
     </main>`
 }
 
-let isStageJumpModalOpen = false
+function importPreviewModalTemplate(): string {
+  if (!pendingImportState || !pendingImportDiff) return ''
+  const diff = pendingImportDiff
+  const exportDate = pendingImportState.exportedAt
+    ? new Date(pendingImportState.exportedAt).toLocaleString()
+    : '未知時間'
+
+  return `
+    <div class="modal-overlay" data-action="cancel-import" role="dialog" aria-modal="true" aria-labelledby="import-preview-title">
+      <div class="modal-card" onclick="event.stopPropagation()">
+        <header class="modal-header">
+          <h3 id="import-preview-title">📦 備份還原預覽與差異比較</h3>
+          <button class="modal-close" data-action="cancel-import" aria-label="關閉預覽">✕ 關閉</button>
+        </header>
+
+        <div class="backup-meta-box">
+          <div><strong>備份結構版本：</strong> v${pendingImportState.version}</div>
+          <div><strong>備份匯出時間：</strong> ${exportDate}</div>
+          <div><strong>備份檔案內容：</strong> 共 ${pendingImportState.scripts.length} 份腳本 (${diff.totalLinesBackup} 句台詞)</div>
+          <div><strong>目前本機內容：</strong> 共 ${state.scripts.length} 份腳本 (${diff.totalLinesLocal} 句台詞)</div>
+        </div>
+
+        <div class="diff-container">
+          ${diff.newScripts.length > 0 ? `
+            <div class="diff-group">
+              <div class="diff-title" style="color: #2e7d32;">🟢 新增腳本 (${diff.newScripts.length} 份 - 本機不存在)</div>
+              <ul class="diff-list">
+                ${diff.newScripts.map((s) => `<li><span>${escapeHtml(s.title)}</span><small>${s.lineCount} 句</small></li>`).join('')}
+              </ul>
+            </div>
+          ` : ''}
+
+          ${diff.modifiedScripts.length > 0 ? `
+            <div class="diff-group">
+              <div class="diff-title" style="color: #b45309;">🟡 變更/不同腳本 (${diff.modifiedScripts.length} 份)</div>
+              <ul class="diff-list">
+                ${diff.modifiedScripts.map((s) => `<li><span>${escapeHtml(s.title)}</span><small>本機 ${s.localCount} 句 ➔ 備份 ${s.backupCount} 句</small></li>`).join('')}
+              </ul>
+            </div>
+          ` : ''}
+
+          ${diff.identicalScripts.length > 0 ? `
+            <div class="diff-group">
+              <div class="diff-title" style="color: #655d72;">⚪ 未變更腳本 (${diff.identicalScripts.length} 份 - 內容相同)</div>
+              <ul class="diff-list">
+                ${diff.identicalScripts.map((s) => `<li><span>${escapeHtml(s.title)}</span><small>內容一致</small></li>`).join('')}
+              </ul>
+            </div>
+          ` : ''}
+        </div>
+
+        <div class="modal-actions">
+          <button class="primary" data-action="confirm-overwrite-import">🔄 覆蓋還原 (取代本機全檔)</button>
+          ${diff.newScripts.length > 0 ? `<button style="background: #00897b; color: white;" data-action="confirm-merge-import">➕ 僅合併新增腳本 (${diff.newScripts.length} 份)</button>` : ''}
+          <button data-action="cancel-import">✕ 取消還原</button>
+        </div>
+      </div>
+    </div>
+  `
+}
+
+function scriptHistoryModalTemplate(script: Script | undefined): string {
+  if (!script) return ''
+  const history = script.history ?? []
+
+  return `
+    <div class="modal-overlay" data-action="close-script-history" role="dialog" aria-modal="true" aria-labelledby="history-title">
+      <div class="modal-card" onclick="event.stopPropagation()">
+        <header class="modal-header">
+          <h3 id="history-title">📜 「${escapeHtml(script.title)}」版本歷史快照</h3>
+          <button class="modal-close" data-action="close-script-history" aria-label="關閉歷史紀錄">✕ 關閉</button>
+        </header>
+
+        ${history.length > 0 ? `
+          <div class="history-list">
+            ${history.map((rev, idx) => `
+              <div class="history-item">
+                <div class="history-item-header">
+                  <span>快照 #${history.length - idx} · ${escapeHtml(rev.title)}</span>
+                  <small>${new Date(rev.timestamp).toLocaleString()}</small>
+                </div>
+                <div class="history-item-reason">備註：${escapeHtml(rev.reason || '內容更新')} (共 ${rev.lines.length} 句)</div>
+                <div class="history-item-snippet">
+                  首句預覽：${escapeHtml(rev.lines[0]?.text || '無內容')}
+                </div>
+                <button class="history-restore-btn" data-action="restore-history-revision" data-index="${idx}">↩ 回復至此版本</button>
+              </div>
+            `).join('')}
+          </div>
+        ` : `
+          <div class="empty">尚無此腳本的歷史快照紀錄。當您編輯台詞或名稱時系統會自動保存快照。</div>
+        `}
+
+        <div class="modal-actions">
+          <button data-action="close-script-history">✕ 關閉</button>
+        </div>
+      </div>
+    </div>
+  `
+}
 
 function stageTemplate(script: Script | undefined, current: CueLine | undefined, next: CueLine | undefined): string {
   const total = script?.lines.length ?? 0
@@ -276,13 +384,27 @@ function stageJumpModalTemplate(script: Script | undefined): string {
 
 function wireEvents(): void {
   app.querySelectorAll<HTMLElement>('[data-action]').forEach((element) => element.addEventListener('click', () => handleAction(element)))
-  app.querySelectorAll<HTMLTextAreaElement>('textarea[data-line-id]').forEach((textarea) => textarea.addEventListener('input', () => {
+  app.querySelectorAll<HTMLTextAreaElement>('textarea[data-line-id]').forEach((textarea) => textarea.addEventListener('change', () => {
     const script = selectedScript(); const line = script?.lines.find((item) => item.id === textarea.dataset.lineId)
     if (!script || !line) return
-    line.text = textarea.value; script.updatedAt = new Date().toISOString(); persist()
+    if (line.text !== textarea.value) {
+      recordScriptHistory(script, '修改台詞文字')
+      line.text = textarea.value
+      script.updatedAt = new Date().toISOString()
+      persist()
+    }
   }))
   const title = app.querySelector<HTMLInputElement>('#script-title')
-  title?.addEventListener('change', () => { const script = selectedScript(); if (script) { script.title = title.value.trim() || '未命名腳本'; script.updatedAt = new Date().toISOString(); persist(); render() } })
+  title?.addEventListener('change', () => {
+    const script = selectedScript()
+    if (script && script.title !== title.value.trim()) {
+      recordScriptHistory(script, '變更腳本名稱')
+      script.title = title.value.trim() || '未命名腳本'
+      script.updatedAt = new Date().toISOString()
+      persist()
+      render()
+    }
+  })
   
   const quickJumpSelect = app.querySelector<HTMLSelectElement>('#quick-jump-select')
   quickJumpSelect?.addEventListener('change', () => {
@@ -306,7 +428,6 @@ function wireEvents(): void {
       })
     })
 
-    // Focus trap inside modal for accessibility
     modalContent?.addEventListener('keydown', (e) => {
       if (e.key === 'Tab') {
         const focusables = modalContent.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), [tabindex="0"]')
@@ -354,7 +475,7 @@ function handleAction(element: HTMLElement): void {
   if (action === 'new-script') { const id = makeId(); state.scripts.unshift({ id, title: '未命名腳本', lines: [], updatedAt: new Date().toISOString() }); state.selectedScriptId = id; currentLineIndex = 0; persist(); render(); return }
   if (action === 'select-script') { const id = element.dataset.id ?? null; touchScript(id); state.selectedScriptId = id; currentLineIndex = 0; render(); return }
   if (action === 'delete-script' && script && confirm(`刪除「${script.title}」？`)) { state.scripts = state.scripts.filter((item) => item.id !== script.id); state.selectedScriptId = getSortedScripts()[0]?.id ?? null; currentLineIndex = 0; persist(); render(); return }
-  if (action === 'add-line' && script) { script.lines.push({ id: makeId(), text: '' }); touchScript(script.id); currentLineIndex = script.lines.length - 1; render(); scrollToActiveLine(); return }
+  if (action === 'add-line' && script) { recordScriptHistory(script, '新增台詞'); script.lines.push({ id: makeId(), text: '' }); touchScript(script.id); currentLineIndex = script.lines.length - 1; render(); scrollToActiveLine(); return }
   if (action === 'select-line') { currentLineIndex = index; render(); scrollToActiveLine(); return }
   if (action === 'play-line') { currentLineIndex = index; render(); scrollToActiveLine(); const line = selectedLine(); if (line) speaker.speak(line.text, state.settings.voiceURI, state.settings.rate, state.settings.pitch); return }
   if (action === 'jump-first') { currentLineIndex = 0; render(); scrollToActiveLine(); announce('跳至第一句'); return }
@@ -364,8 +485,8 @@ function handleAction(element: HTMLElement): void {
   if (action === 'open-stage-jump') { isStageJumpModalOpen = true; render(); return }
   if (action === 'close-stage-jump') { isStageJumpModalOpen = false; render(); return }
   if (action === 'stage-jump-to') { currentLineIndex = index; isStageJumpModalOpen = false; render(); announce(`已跳轉至第 ${index + 1} 句`); return }
-  if (action === 'delete-line' && script) { script.lines.splice(index, 1); currentLineIndex = Math.max(0, Math.min(currentLineIndex, script.lines.length - 1)); persist(); render(); return }
-  if (action === 'move-line' && script) { const target = index + Number(element.dataset.direction); if (target >= 0 && target < script.lines.length) [script.lines[index], script.lines[target]] = [script.lines[target], script.lines[index]]; currentLineIndex = target; persist(); render(); scrollToActiveLine(); return }
+  if (action === 'delete-line' && script) { recordScriptHistory(script, '刪除台詞'); script.lines.splice(index, 1); currentLineIndex = Math.max(0, Math.min(currentLineIndex, script.lines.length - 1)); touchScript(script.id); render(); return }
+  if (action === 'move-line' && script) { recordScriptHistory(script, '調整台詞順序'); const target = index + Number(element.dataset.direction); if (target >= 0 && target < script.lines.length) [script.lines[index], script.lines[target]] = [script.lines[target], script.lines[index]]; currentLineIndex = target; touchScript(script.id); render(); scrollToActiveLine(); return }
   if (action === 'play' || action === 'replay') { isContinuousPlaying = false; const line = selectedLine(); if (line) speaker.speak(line.text, state.settings.voiceURI, state.settings.rate, state.settings.pitch); return }
   if (action === 'play-continuous') { isContinuousPlaying = true; render(); const line = selectedLine(); if (line) speaker.speak(line.text, state.settings.voiceURI, state.settings.rate, state.settings.pitch); return }
   if (action === 'stop') { isContinuousPlaying = false; speaker.stop(); render(); return }
@@ -378,12 +499,61 @@ function handleAction(element: HTMLElement): void {
   if (action === 'add-rescue') { const phrase = prompt('新增救援句'); if (phrase?.trim()) { state.settings.rescuePhrases.push(phrase.trim()); persist(); render() }; return }
   if (action === 'delete-rescue') { state.settings.rescuePhrases.splice(index, 1); persist(); render(); return }
   if (action === 'export') exportJson()
+  
+  if (action === 'open-script-history') { isScriptHistoryModalOpen = true; render(); return }
+  if (action === 'close-script-history') { isScriptHistoryModalOpen = false; render(); return }
+  if (action === 'restore-history-revision' && script && script.history?.[index]) {
+    const rev = script.history[index]
+    recordScriptHistory(script, `回復至歷史快照 #${script.history.length - index}`)
+    script.title = rev.title
+    script.lines = rev.lines.map((l) => ({ ...l }))
+    script.updatedAt = new Date().toISOString()
+    isScriptHistoryModalOpen = false
+    currentLineIndex = 0
+    persist()
+    render()
+    announce(`已成功將腳本回復至「${rev.title}」快照！`)
+    return
+  }
+
+  if (action === 'cancel-import') { pendingImportState = null; pendingImportDiff = null; isImportPreviewModalOpen = false; render(); return }
+  if (action === 'confirm-overwrite-import' && pendingImportState) {
+    state = pendingImportState
+    pendingImportState = null
+    pendingImportDiff = null
+    isImportPreviewModalOpen = false
+    currentLineIndex = 0
+    persist()
+    render()
+    announce('備份已成功全檔覆蓋還原！')
+    return
+  }
+  if (action === 'confirm-merge-import' && pendingImportState && pendingImportDiff) {
+    const newScriptsFromBackup = pendingImportState.scripts.filter((bs) => 
+      !state.scripts.some((ls) => ls.id === bs.id || ls.title === bs.title)
+    )
+    state.scripts.unshift(...newScriptsFromBackup)
+    pendingImportState = null
+    pendingImportDiff = null
+    isImportPreviewModalOpen = false
+    persist()
+    render()
+    announce(`已成功合併匯入 ${newScriptsFromBackup.length} 份新腳本！`)
+    return
+  }
 }
 
 function exportJson(): void {
   const dateStr = new Date().toISOString().slice(0, 10)
-  const filename = `mic-cue-backup-${dateStr}.json`
-  const jsonStr = JSON.stringify(state, null, 2)
+  const filename = `mic-cue-backup-v1-${dateStr}.json`
+  const exportPayload: AppState = {
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    selectedScriptId: state.selectedScriptId,
+    scripts: state.scripts,
+    settings: state.settings
+  }
+  const jsonStr = JSON.stringify(exportPayload, null, 2)
   const blob = new Blob([jsonStr], { type: 'application/json;charset=utf-8;' })
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
@@ -393,7 +563,7 @@ function exportJson(): void {
   link.click()
   document.body.removeChild(link)
   URL.revokeObjectURL(url)
-  announce('JSON 安全備份已成功匯出。')
+  announce('JSON 安全備份 (含版本資訊) 已成功匯出。')
 }
 
 async function importJson(event: Event): Promise<void> {
@@ -404,15 +574,12 @@ async function importJson(event: Event): Promise<void> {
     const rawText = await file.text()
     const imported = validateImportedState(rawText)
     if (!imported) throw new Error('Invalid file format or corrupted structure')
-    if (!confirm('匯入會取代這台裝置上的所有 Mic Cue 資料。要繼續嗎？')) {
-      input.value = ''
-      return
-    }
-    state = imported
-    currentLineIndex = 0
-    persist()
-    announce('JSON 備份已成功匯入與自動升級相容。')
+    
+    pendingImportState = imported
+    pendingImportDiff = calculateBackupDiff(state, imported)
+    isImportPreviewModalOpen = true
     render()
+    announce('已成功載入備份預覽與差異分析。')
   } catch {
     announce('無法匯入：檔案格式不正確、檔案過大或內容損毀。')
   } finally {
@@ -421,11 +588,10 @@ async function importJson(event: Event): Promise<void> {
 }
 
 document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape' && isStageJumpModalOpen) {
-    event.preventDefault()
-    isStageJumpModalOpen = false
-    render()
-    return
+  if (event.key === 'Escape') {
+    if (isStageJumpModalOpen) { isStageJumpModalOpen = false; render(); return }
+    if (isImportPreviewModalOpen) { pendingImportState = null; pendingImportDiff = null; isImportPreviewModalOpen = false; render(); return }
+    if (isScriptHistoryModalOpen) { isScriptHistoryModalOpen = false; render(); return }
   }
   if ((event.target as HTMLElement).matches('input, textarea, select')) return
   if (event.key === ' ' || event.key === 'Enter') { event.preventDefault(); const line = selectedLine(); if (line && !isLocked) speaker.speak(line.text, state.settings.voiceURI, state.settings.rate, state.settings.pitch) }

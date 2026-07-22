@@ -3,11 +3,20 @@ export interface CueLine {
   text: string
 }
 
+export interface ScriptRevision {
+  id: string
+  timestamp: string
+  title: string
+  lines: CueLine[]
+  reason?: string
+}
+
 export interface Script {
   id: string
   title: string
   lines: CueLine[]
   updatedAt: string
+  history?: ScriptRevision[]
 }
 
 export interface Settings {
@@ -22,7 +31,17 @@ export interface Settings {
 
 export interface AppState {
   version: 1
+  exportedAt?: string
   scripts: Script[]
   selectedScriptId: string | null
   settings: Settings
 }
+
+export interface BackupDiffSummary {
+  newScripts: { title: string; lineCount: number }[]
+  modifiedScripts: { title: string; localCount: number; backupCount: number }[]
+  identicalScripts: { title: string }[]
+  totalLinesLocal: number
+  totalLinesBackup: number
+}
+

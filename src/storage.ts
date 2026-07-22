@@ -1,4 +1,4 @@
-import type { AppState, CueLine, Script, Settings } from './types'
+import type { AppState, BackupDiffSummary, CueLine, Script, ScriptRevision, Settings } from './types'
 
 const KEY = 'mic-cue-pwa-state-v1'
 const CURRENT_VERSION = 1
@@ -64,6 +64,22 @@ function sanitizeLine(value: unknown): CueLine | null {
   return { id, text }
 }
 
+function sanitizeRevision(value: unknown): ScriptRevision | null {
+  if (!value || typeof value !== 'object') return null
+  const candidate = value as Partial<ScriptRevision>
+  const id = sanitizeText(candidate.id) ?? makeId()
+  const timestamp = sanitizeText(candidate.timestamp) || new Date().toISOString()
+  const title = sanitizeText(candidate.title) || '未命名歷史版本'
+  const reason = sanitizeText(candidate.reason) || '編輯快照'
+  if (!Array.isArray(candidate.lines)) return null
+  const lines = candidate.lines
+    .slice(0, 1000)
+    .map(sanitizeLine)
+    .filter((line: CueLine | null): line is CueLine => !!line)
+  if (!lines.length) return null
+  return { id, timestamp, title, lines, reason }
+}
+
 function sanitizeScript(value: unknown): Script | null {
   if (!value || typeof value !== 'object') return null
   const candidate = value as Partial<Script>
@@ -76,7 +92,72 @@ function sanitizeScript(value: unknown): Script | null {
     .map(sanitizeLine)
     .filter((line): line is CueLine => !!line)
   if (!lines.length) return null
-  return { id, title, updatedAt, lines }
+
+  const history = Array.isArray(candidate.history)
+    ? candidate.history
+        .slice(0, 10)
+        .map(sanitizeRevision)
+        .filter((rev): rev is ScriptRevision => !!rev)
+    : []
+
+  return { id, title, updatedAt, lines, history }
+}
+
+export function createScriptSnapshot(script: Script, reason = '內容快照'): ScriptRevision {
+  return {
+    id: makeId(),
+    timestamp: new Date().toISOString(),
+    title: script.title,
+    lines: script.lines.map((l) => ({ ...l })),
+    reason
+  }
+}
+
+export function recordScriptHistory(script: Script, reason = '內容更新'): void {
+  if (!script.history) script.history = []
+  const last = script.history[0]
+  const currentContent = JSON.stringify({ title: script.title, lines: script.lines })
+  const lastContent = last ? JSON.stringify({ title: last.title, lines: last.lines }) : ''
+  if (currentContent !== lastContent) {
+    script.history.unshift(createScriptSnapshot(script, reason))
+    if (script.history.length > 10) {
+      script.history = script.history.slice(0, 10)
+    }
+  }
+}
+
+export function calculateBackupDiff(localState: AppState, backupState: AppState): BackupDiffSummary {
+  const newScripts: { title: string; lineCount: number }[] = []
+  const modifiedScripts: { title: string; localCount: number; backupCount: number }[] = []
+  const identicalScripts: { title: string }[] = []
+
+  let totalLinesLocal = 0
+  localState.scripts.forEach((s) => totalLinesLocal += s.lines.length)
+
+  let totalLinesBackup = 0
+  backupState.scripts.forEach((s) => {
+    totalLinesBackup += s.lines.length
+    const localScript = localState.scripts.find((ls) => ls.id === s.id || ls.title === s.title)
+    if (!localScript) {
+      newScripts.push({ title: s.title, lineCount: s.lines.length })
+    } else {
+      const localText = JSON.stringify(localScript.lines.map((l) => l.text))
+      const backupText = JSON.stringify(s.lines.map((l) => l.text))
+      if (localText === backupText && localScript.title === s.title) {
+        identicalScripts.push({ title: s.title })
+      } else {
+        modifiedScripts.push({ title: s.title, localCount: localScript.lines.length, backupCount: s.lines.length })
+      }
+    }
+  })
+
+  return {
+    newScripts,
+    modifiedScripts,
+    identicalScripts,
+    totalLinesLocal,
+    totalLinesBackup
+  }
 }
 
 function sanitizeSettings(value: unknown): Settings {
