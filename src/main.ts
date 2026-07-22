@@ -173,11 +173,31 @@ function rehearsalTemplate(script: Script | undefined, current: CueLine | undefi
 
 function stageTemplate(script: Script | undefined, current: CueLine | undefined, next: CueLine | undefined): string {
   return `<main id="main-content" class="stage-shell" style="--cue-scale:${state.settings.fontScale}">
-    <header class="stage-header"><button data-action="exit-stage">離開舞台模式</button><p>${escapeHtml(script?.title ?? 'Mic Cue')}</p><button data-action="toggle-lock" class="lock-button">${isLocked ? `${icon('lock')} 已鎖定` : `${icon('unlock')} 已解鎖`}</button></header>
-    <section class="cue-current" aria-label="目前句子"><span>目前句子 ${currentLineIndex + 1} / ${script?.lines.length ?? 0}</span><p>${escapeHtml(current?.text || '沒有可播放的台詞')}</p></section>
+    <header class="stage-header">
+      <button data-action="exit-stage">離開舞台模式</button>
+      <p>${escapeHtml(script?.title ?? 'Mic Cue')}</p>
+      ${script && script.lines.length > 0 ? `
+        <select id="stage-quick-jump-select" class="stage-quick-jump-select" ${isLocked ? 'disabled' : ''} aria-label="舞台模式快速跳轉台詞">
+          <option value="">🎯 快速跳至台詞...</option>
+          ${script.lines.map((line, idx) => `<option value="${idx}" ${idx === currentLineIndex ? 'selected' : ''}>第 ${idx + 1} 句: ${escapeHtml(line.text.slice(0, 20))}${line.text.length > 20 ? '...' : ''}</option>`).join('')}
+        </select>
+      ` : ''}
+      <button data-action="toggle-lock" class="lock-button">${isLocked ? `${icon('lock')} 已鎖定` : `${icon('unlock')} 已解鎖`}</button>
+    </header>
+    <section class="cue-current" aria-label="目前句子">
+      <span>目前句子 ${currentLineIndex + 1} / ${script?.lines.length ?? 0} ${isContinuousPlaying ? '<span class="continuous-mode-badge" style="margin-left:0.5rem;">⚡ 全劇連播中</span>' : ''}</span>
+      <p>${escapeHtml(current?.text || '沒有可播放的台詞')}</p>
+    </section>
     <section class="cue-next" aria-label="下一句"><span>下一句</span><p>${escapeHtml(next?.text || '已是最後一句')}</p></section>
-    <div class="stage-status" role="status" aria-live="polite">${playbackStatus === 'playing' ? '正在播放目前句子' : '已停止播放'}</div>
-    <section class="stage-controls" aria-label="舞台控制"><button data-action="previous" ${isLocked ? 'disabled' : ''}>${icon('previous')}<span>上一句</span></button><button data-action="replay" ${isLocked ? 'disabled' : ''}>${icon('replay')}<span>重播</span></button><button class="stage-play" data-action="play" ${isLocked ? 'disabled' : ''}>${icon('play')}<span>播放</span></button><button data-action="stop">${icon('stop')}<span>停止</span></button><button data-action="next" ${isLocked ? 'disabled' : ''}>${icon('next')}<span>下一句</span></button></section>
+    <div class="stage-status" role="status" aria-live="polite">${playbackStatus === 'playing' ? (isContinuousPlaying ? '⚡ 全劇連播中' : '正在播放目前句子') : '已停止播放'}</div>
+    <section class="stage-controls" aria-label="舞台控制">
+      <button data-action="previous" ${isLocked ? 'disabled' : ''}>${icon('previous')}<span>上一句</span></button>
+      <button data-action="replay" ${isLocked ? 'disabled' : ''}>${icon('replay')}<span>重播</span></button>
+      <button class="stage-play" data-action="play" ${isLocked ? 'disabled' : ''}>${icon('play')}<span>播放單句</span></button>
+      <button class="stage-play-continuous ${isContinuousPlaying ? 'active' : ''}" data-action="play-continuous" ${isLocked ? 'disabled' : ''}>${icon('play')}<span>全劇連播</span></button>
+      <button data-action="stop">${icon('stop')}<span>停止</span></button>
+      <button data-action="next" ${isLocked ? 'disabled' : ''}>${icon('next')}<span>下一句</span></button>
+    </section>
     ${isLocked ? '<p class="lock-note">舞台控制已鎖定。按右上角「已鎖定」進行明確解鎖；停止鍵仍可使用。</p>' : ''}
   </main>`
 }
@@ -198,6 +218,18 @@ function wireEvents(): void {
       currentLineIndex = Number(quickJumpSelect.value)
       render()
       scrollToActiveLine()
+    }
+  })
+
+  const stageQuickJumpSelect = app.querySelector<HTMLSelectElement>('#stage-quick-jump-select')
+  stageQuickJumpSelect?.addEventListener('change', () => {
+    if (stageQuickJumpSelect.value !== '') {
+      currentLineIndex = Number(stageQuickJumpSelect.value)
+      render()
+      if (isContinuousPlaying) {
+        const line = selectedLine()
+        if (line) speaker.speak(line.text, state.settings.voiceURI, state.settings.rate, state.settings.pitch)
+      }
     }
   })
 
