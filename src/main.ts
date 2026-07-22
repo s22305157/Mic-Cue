@@ -171,35 +171,71 @@ function rehearsalTemplate(script: Script | undefined, current: CueLine | undefi
     </main>`
 }
 
+let isStageJumpModalOpen = false
+
 function stageTemplate(script: Script | undefined, current: CueLine | undefined, next: CueLine | undefined): string {
+  const total = script?.lines.length ?? 0
   return `<main id="main-content" class="stage-shell" style="--cue-scale:${state.settings.fontScale}">
     <header class="stage-header">
       <button data-action="exit-stage">離開舞台模式</button>
       <p>${escapeHtml(script?.title ?? 'Mic Cue')}</p>
-      ${script && script.lines.length > 0 ? `
-        <select id="stage-quick-jump-select" class="stage-quick-jump-select" ${isLocked ? 'disabled' : ''} aria-label="舞台模式快速跳轉台詞">
-          <option value="">🎯 快速跳至台詞...</option>
-          ${script.lines.map((line, idx) => `<option value="${idx}" ${idx === currentLineIndex ? 'selected' : ''}>第 ${idx + 1} 句: ${escapeHtml(line.text.slice(0, 20))}${line.text.length > 20 ? '...' : ''}</option>`).join('')}
-        </select>
-      ` : ''}
       <button data-action="toggle-lock" class="lock-button">${isLocked ? `${icon('lock')} 已鎖定` : `${icon('unlock')} 已解鎖`}</button>
     </header>
+
+    ${script && total > 0 ? `
+      <div class="stage-jump-toolbar">
+        <button data-action="jump-first" ${isLocked || currentLineIndex === 0 ? 'disabled' : ''}>⏮ 首句</button>
+        <button data-action="jump-back-5" ${isLocked || currentLineIndex === 0 ? 'disabled' : ''}>◀ -5 句</button>
+        <button class="stage-jump-trigger" data-action="open-stage-jump" ${isLocked ? 'disabled' : ''}>🎯 跳轉句子 (${currentLineIndex + 1} / ${total})</button>
+        <button data-action="jump-forward-5" ${isLocked || currentLineIndex >= total - 1 ? 'disabled' : ''}>+5 句 ▶</button>
+        <button data-action="jump-last" ${isLocked || currentLineIndex >= total - 1 ? 'disabled' : ''}>⏭ 尾句</button>
+      </div>
+    ` : ''}
+
     <section class="cue-current" aria-label="目前句子">
-      <span>目前句子 ${currentLineIndex + 1} / ${script?.lines.length ?? 0} ${isContinuousPlaying ? '<span class="continuous-mode-badge" style="margin-left:0.5rem;">⚡ 全劇連播中</span>' : ''}</span>
+      <span>目前句子 ${currentLineIndex + 1} / ${total}</span>
       <p>${escapeHtml(current?.text || '沒有可播放的台詞')}</p>
     </section>
     <section class="cue-next" aria-label="下一句"><span>下一句</span><p>${escapeHtml(next?.text || '已是最後一句')}</p></section>
-    <div class="stage-status" role="status" aria-live="polite">${playbackStatus === 'playing' ? (isContinuousPlaying ? '⚡ 全劇連播中' : '正在播放目前句子') : '已停止播放'}</div>
+    <div class="stage-status" role="status" aria-live="polite">${playbackStatus === 'playing' ? '正在播放目前句子' : '已停止播放'}</div>
     <section class="stage-controls" aria-label="舞台控制">
       <button data-action="previous" ${isLocked ? 'disabled' : ''}>${icon('previous')}<span>上一句</span></button>
       <button data-action="replay" ${isLocked ? 'disabled' : ''}>${icon('replay')}<span>重播</span></button>
-      <button class="stage-play" data-action="play" ${isLocked ? 'disabled' : ''}>${icon('play')}<span>播放單句</span></button>
-      <button class="stage-play-continuous ${isContinuousPlaying ? 'active' : ''}" data-action="play-continuous" ${isLocked ? 'disabled' : ''}>${icon('play')}<span>全劇連播</span></button>
+      <button class="stage-play" data-action="play" ${isLocked ? 'disabled' : ''}>${icon('play')}<span>播放</span></button>
       <button data-action="stop">${icon('stop')}<span>停止</span></button>
       <button data-action="next" ${isLocked ? 'disabled' : ''}>${icon('next')}<span>下一句</span></button>
     </section>
     ${isLocked ? '<p class="lock-note">舞台控制已鎖定。按右上角「已鎖定」進行明確解鎖；停止鍵仍可使用。</p>' : ''}
+
+    ${isStageJumpModalOpen ? stageJumpModalTemplate(script) : ''}
   </main>`
+}
+
+function stageJumpModalTemplate(script: Script | undefined): string {
+  if (!script) return ''
+  const gridItems = script.lines.map((line, idx) => `
+    <button class="stage-jump-grid-item ${idx === currentLineIndex ? 'active' : ''}" data-action="stage-jump-to" data-index="${idx}">
+      <span class="jump-item-num">第 ${idx + 1} 句</span>
+      <span class="jump-item-text">${escapeHtml(line.text)}</span>
+    </button>
+  `).join('')
+
+  return `
+    <div class="stage-jump-modal-overlay" data-action="close-stage-jump">
+      <div class="stage-jump-modal-content" onclick="event.stopPropagation()">
+        <header class="stage-jump-modal-header">
+          <h3>🎯 舞台台詞快速跳轉選單 (共 ${script.lines.length} 句)</h3>
+          <button class="stage-jump-modal-close" data-action="close-stage-jump">✕ 關閉 (Esc)</button>
+        </header>
+        <div class="stage-jump-search-row">
+          <input type="text" id="stage-jump-filter" placeholder="🔍 輸入關鍵字快速過濾台詞..." autocomplete="off">
+        </div>
+        <div class="stage-jump-grid" id="stage-jump-grid">
+          ${gridItems}
+        </div>
+      </div>
+    </div>
+  `
 }
 
 function wireEvents(): void {
@@ -221,17 +257,19 @@ function wireEvents(): void {
     }
   })
 
-  const stageQuickJumpSelect = app.querySelector<HTMLSelectElement>('#stage-quick-jump-select')
-  stageQuickJumpSelect?.addEventListener('change', () => {
-    if (stageQuickJumpSelect.value !== '') {
-      currentLineIndex = Number(stageQuickJumpSelect.value)
-      render()
-      if (isContinuousPlaying) {
-        const line = selectedLine()
-        if (line) speaker.speak(line.text, state.settings.voiceURI, state.settings.rate, state.settings.pitch)
-      }
-    }
-  })
+  if (isStageJumpModalOpen) {
+    const filterInput = app.querySelector<HTMLInputElement>('#stage-jump-filter')
+    filterInput?.focus()
+    filterInput?.addEventListener('input', () => {
+      const query = filterInput.value.trim().toLowerCase()
+      app.querySelectorAll<HTMLElement>('.stage-jump-grid-item').forEach((item) => {
+        const text = item.textContent?.toLowerCase() ?? ''
+        item.style.display = text.includes(query) ? '' : 'none'
+      })
+    })
+    const activeItem = app.querySelector<HTMLElement>('.stage-jump-grid-item.active')
+    activeItem?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  }
 
   bindSetting('voice-select', (value) => { state.settings.voiceURI = value })
   bindSetting('rate', (value) => { state.settings.rate = Number(value) })
@@ -265,6 +303,11 @@ function handleAction(element: HTMLElement): void {
   if (action === 'play-line') { currentLineIndex = index; render(); scrollToActiveLine(); const line = selectedLine(); if (line) speaker.speak(line.text, state.settings.voiceURI, state.settings.rate, state.settings.pitch); return }
   if (action === 'jump-first') { currentLineIndex = 0; render(); scrollToActiveLine(); return }
   if (action === 'jump-last' && script) { currentLineIndex = Math.max(0, script.lines.length - 1); render(); scrollToActiveLine(); return }
+  if (action === 'jump-back-5') { currentLineIndex = Math.max(0, currentLineIndex - 5); render(); scrollToActiveLine(); return }
+  if (action === 'jump-forward-5' && script) { currentLineIndex = Math.min(Math.max(0, script.lines.length - 1), currentLineIndex + 5); render(); scrollToActiveLine(); return }
+  if (action === 'open-stage-jump') { isStageJumpModalOpen = true; render(); return }
+  if (action === 'close-stage-jump') { isStageJumpModalOpen = false; render(); return }
+  if (action === 'stage-jump-to') { currentLineIndex = index; isStageJumpModalOpen = false; render(); return }
   if (action === 'delete-line' && script) { script.lines.splice(index, 1); currentLineIndex = Math.max(0, Math.min(currentLineIndex, script.lines.length - 1)); persist(); render(); return }
   if (action === 'move-line' && script) { const target = index + Number(element.dataset.direction); if (target >= 0 && target < script.lines.length) [script.lines[index], script.lines[target]] = [script.lines[target], script.lines[index]]; currentLineIndex = target; persist(); render(); scrollToActiveLine(); return }
   if (action === 'play' || action === 'replay') { isContinuousPlaying = false; const line = selectedLine(); if (line) speaker.speak(line.text, state.settings.voiceURI, state.settings.rate, state.settings.pitch); return }
@@ -272,8 +315,8 @@ function handleAction(element: HTMLElement): void {
   if (action === 'stop') { isContinuousPlaying = false; speaker.stop(); render(); return }
   if (action === 'previous') { currentLineIndex = Math.max(0, currentLineIndex - 1); render(); scrollToActiveLine(); return }
   if (action === 'next') { currentLineIndex = Math.min(Math.max(0, (script?.lines.length ?? 1) - 1), currentLineIndex + 1); render(); scrollToActiveLine(); return }
-  if (action === 'enter-stage') { mode = 'stage'; isLocked = state.settings.stageLockOnEntry; speaker.stop(false); render(); return }
-  if (action === 'exit-stage') { mode = 'rehearsal'; speaker.stop(false); render(); return }
+  if (action === 'enter-stage') { mode = 'stage'; isLocked = state.settings.stageLockOnEntry; isContinuousPlaying = false; isStageJumpModalOpen = false; speaker.stop(false); render(); return }
+  if (action === 'exit-stage') { mode = 'rehearsal'; isStageJumpModalOpen = false; speaker.stop(false); render(); return }
   if (action === 'toggle-lock') { isLocked = !isLocked; announce(isLocked ? '舞台控制已鎖定。' : '舞台控制已解鎖。'); render(); return }
   if (action === 'speak-rescue') { speaker.speak(state.settings.rescuePhrases[index], state.settings.voiceURI, state.settings.rate, state.settings.pitch); return }
   if (action === 'add-rescue') { const phrase = prompt('新增救援句'); if (phrase?.trim()) { state.settings.rescuePhrases.push(phrase.trim()); persist(); render() }; return }
@@ -300,6 +343,12 @@ async function importJson(event: Event): Promise<void> {
 }
 
 document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && isStageJumpModalOpen) {
+    event.preventDefault()
+    isStageJumpModalOpen = false
+    render()
+    return
+  }
   if ((event.target as HTMLElement).matches('input, textarea, select')) return
   if (event.key === ' ' || event.key === 'Enter') { event.preventDefault(); const line = selectedLine(); if (line && !isLocked) speaker.speak(line.text, state.settings.voiceURI, state.settings.rate, state.settings.pitch) }
   if (event.key === 'Home' && !isLocked) { currentLineIndex = 0; render(); scrollToActiveLine() }
@@ -308,10 +357,12 @@ document.addEventListener('keydown', (event) => {
   if (event.key === 'PageDown' && !isLocked) { const count = selectedScript()?.lines.length ?? 0; currentLineIndex = Math.min(Math.max(0, count - 1), currentLineIndex + 5); render(); scrollToActiveLine() }
   if (event.key === 'ArrowLeft' && !isLocked) { currentLineIndex = Math.max(0, currentLineIndex - 1); render(); scrollToActiveLine() }
   if (event.key === 'ArrowRight' && !isLocked) { const count = selectedScript()?.lines.length ?? 0; currentLineIndex = Math.min(Math.max(0, count - 1), currentLineIndex + 1); render(); scrollToActiveLine() }
+  if (event.key.toLowerCase() === 'j' && mode === 'stage' && !isLocked) { isStageJumpModalOpen = !isStageJumpModalOpen; render() }
   if (event.key.toLowerCase() === 's') { isContinuousPlaying = false; speaker.stop(); render() }
   if (event.key.toLowerCase() === 'l' && mode === 'stage') { isLocked = !isLocked; render() }
 })
 
 speechSynthesis.addEventListener('voiceschanged', render)
 render()
+
 
