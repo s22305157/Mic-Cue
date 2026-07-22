@@ -161,7 +161,7 @@ function rehearsalTemplate(script: Script | undefined, current: CueLine | undefi
         <section><h2>語音設定</h2><label>語音<select id="voice-select"><option value="">系統預設</option>${speaker.voices.map((voice) => `<option value="${escapeHtml(voice.voiceURI)}" ${voice.voiceURI === state.settings.voiceURI ? 'selected' : ''}>${escapeHtml(voice.name)} (${voice.lang})</option>`).join('')}</select></label>
           <label>語速 <output>${state.settings.rate.toFixed(1)}×</output><input id="rate" type="range" min="0.5" max="2" step="0.1" value="${state.settings.rate}"></label>
           <label>音調 <output>${state.settings.pitch.toFixed(1)}</output><input id="pitch" type="range" min="0.5" max="2" step="0.1" value="${state.settings.pitch}"></label>
-          <label>文字大小 <output>${state.settings.fontScale.toFixed(1)}×</output><input id="font-scale" type="range" min="0.8" max="1.6" step="0.1" value="${state.settings.fontScale}"></label>
+          <label>文字大小 <output>${state.settings.fontScale.toFixed(1)}×</output><input id="font-scale" type="range" min="0.8" max="2.0" step="0.1" value="${state.settings.fontScale}"></label>
           <label class="checkbox"><input id="auto-advance" type="checkbox" ${state.settings.autoAdvance ? 'checked' : ''}> 啟用連續朗讀模式 (單句播放完自動接續下一句)</label>
           <label class="checkbox"><input id="lock-on-entry" type="checkbox" ${state.settings.stageLockOnEntry ? 'checked' : ''}> 進入舞台模式時啟用 Stage Lock</label>
         </section>
@@ -183,29 +183,29 @@ function stageTemplate(script: Script | undefined, current: CueLine | undefined,
     </header>
 
     ${script && total > 0 ? `
-      <div class="stage-jump-toolbar">
-        <button data-action="jump-first" ${isLocked || currentLineIndex === 0 ? 'disabled' : ''}>⏮ 首句</button>
-        <button data-action="jump-back-5" ${isLocked || currentLineIndex === 0 ? 'disabled' : ''}>◀ -5 句</button>
-        <button class="stage-jump-trigger" data-action="open-stage-jump" ${isLocked ? 'disabled' : ''}>🎯 跳轉句子 (${currentLineIndex + 1} / ${total})</button>
-        <button data-action="jump-forward-5" ${isLocked || currentLineIndex >= total - 1 ? 'disabled' : ''}>+5 句 ▶</button>
-        <button data-action="jump-last" ${isLocked || currentLineIndex >= total - 1 ? 'disabled' : ''}>⏭ 尾句</button>
+      <div class="stage-jump-toolbar" role="region" aria-label="舞台快速跳轉工具列">
+        <button data-action="jump-first" ${isLocked || currentLineIndex === 0 ? 'disabled' : ''} aria-label="跳至全劇第一句">⏮ 首句</button>
+        <button data-action="jump-back-5" ${isLocked || currentLineIndex === 0 ? 'disabled' : ''} aria-label="倒退5句">◀ -5 句</button>
+        <button class="stage-jump-trigger" data-action="open-stage-jump" ${isLocked ? 'disabled' : ''} aria-label="開啟句子跳轉盤，目前第 ${currentLineIndex + 1} 句，共 ${total} 句">🎯 跳轉句子 (${currentLineIndex + 1} / ${total})</button>
+        <button data-action="jump-forward-5" ${isLocked || currentLineIndex >= total - 1 ? 'disabled' : ''} aria-label="前進5句">+5 句 ▶</button>
+        <button data-action="jump-last" ${isLocked || currentLineIndex >= total - 1 ? 'disabled' : ''} aria-label="跳至全劇最後一句">⏭ 尾句</button>
       </div>
     ` : ''}
 
-    <section class="cue-current" aria-label="目前句子">
+    <section class="cue-current" aria-label="目前台詞 (大字提示卡)">
       <span>目前句子 ${currentLineIndex + 1} / ${total}</span>
       <p>${escapeHtml(current?.text || '沒有可播放的台詞')}</p>
     </section>
-    <section class="cue-next" aria-label="下一句"><span>下一句</span><p>${escapeHtml(next?.text || '已是最後一句')}</p></section>
+    <section class="cue-next" aria-label="下一句台詞預覽"><span>下一句</span><p>${escapeHtml(next?.text || '已是最後一句')}</p></section>
     <div class="stage-status" role="status" aria-live="polite">${playbackStatus === 'playing' ? '正在播放目前句子' : '已停止播放'}</div>
-    <section class="stage-controls" aria-label="舞台控制">
-      <button data-action="previous" ${isLocked ? 'disabled' : ''}>${icon('previous')}<span>上一句</span></button>
-      <button data-action="replay" ${isLocked ? 'disabled' : ''}>${icon('replay')}<span>重播</span></button>
-      <button class="stage-play" data-action="play" ${isLocked ? 'disabled' : ''}>${icon('play')}<span>播放</span></button>
-      <button data-action="stop">${icon('stop')}<span>停止</span></button>
-      <button data-action="next" ${isLocked ? 'disabled' : ''}>${icon('next')}<span>下一句</span></button>
+    <section class="stage-controls" aria-label="舞台控制選項">
+      <button data-action="previous" ${isLocked ? 'disabled' : ''} aria-label="上一句">${icon('previous')}<span>上一句</span></button>
+      <button data-action="replay" ${isLocked ? 'disabled' : ''} aria-label="重播當前句">${icon('replay')}<span>重播</span></button>
+      <button class="stage-play" data-action="play" ${isLocked ? 'disabled' : ''} aria-label="播放當前句">${icon('play')}<span>播放</span></button>
+      <button data-action="stop" aria-label="停止播放">${icon('stop')}<span>停止</span></button>
+      <button data-action="next" ${isLocked ? 'disabled' : ''} aria-label="下一句">${icon('next')}<span>下一句</span></button>
     </section>
-    ${isLocked ? '<p class="lock-note">舞台控制已鎖定。按右上角「已鎖定」進行明確解鎖；停止鍵與救援句仍可使用。</p>' : ''}
+    ${isLocked ? '<p class="lock-note" role="note">舞台控制已鎖定。按右上角「已鎖定」進行解鎖；停止鍵與救援句隨時可用。</p>' : ''}
 
     ${state.settings.rescuePhrases.length > 0 ? `
       <section class="stage-rescue" aria-label="舞台常用救援句">
@@ -214,8 +214,8 @@ function stageTemplate(script: Script | undefined, current: CueLine | undefined,
         </div>
         <div class="stage-rescue-list">
           ${state.settings.rescuePhrases.map((phrase, idx) => `
-            <button class="stage-rescue-btn" data-action="speak-rescue" data-index="${idx}" title="緊急播放救援句：${escapeHtml(phrase)}">
-              <span class="rescue-icon">🆘</span>
+            <button class="stage-rescue-btn" data-action="speak-rescue" data-index="${idx}" aria-label="緊急播放救援句：${escapeHtml(phrase)}">
+              <span class="rescue-icon" aria-hidden="true">🆘</span>
               <span class="rescue-text">${escapeHtml(phrase)}</span>
             </button>
           `).join('')}
@@ -230,21 +230,22 @@ function stageTemplate(script: Script | undefined, current: CueLine | undefined,
 function stageJumpModalTemplate(script: Script | undefined): string {
   if (!script) return ''
   const gridItems = script.lines.map((line, idx) => `
-    <button class="stage-jump-grid-item ${idx === currentLineIndex ? 'active' : ''}" data-action="stage-jump-to" data-index="${idx}">
-      <span class="jump-item-num">第 ${idx + 1} 句</span>
+    <button class="stage-jump-grid-item ${idx === currentLineIndex ? 'active' : ''}" data-action="stage-jump-to" data-index="${idx}" aria-label="跳至第 ${idx + 1} 句：${escapeHtml(line.text)}">
+      <span class="jump-item-num" aria-hidden="true">第 ${idx + 1} 句</span>
       <span class="jump-item-text">${escapeHtml(line.text)}</span>
     </button>
   `).join('')
 
   return `
-    <div class="stage-jump-modal-overlay" data-action="close-stage-jump">
+    <div class="stage-jump-modal-overlay" data-action="close-stage-jump" role="dialog" aria-modal="true" aria-labelledby="stage-jump-title">
       <div class="stage-jump-modal-content" onclick="event.stopPropagation()">
         <header class="stage-jump-modal-header">
-          <h3>🎯 舞台台詞快速跳轉選單 (共 ${script.lines.length} 句)</h3>
-          <button class="stage-jump-modal-close" data-action="close-stage-jump">✕ 關閉 (Esc)</button>
+          <h3 id="stage-jump-title">🎯 舞台台詞快速跳轉盤 (共 ${script.lines.length} 句)</h3>
+          <button class="stage-jump-modal-close" data-action="close-stage-jump" aria-label="關閉句子跳轉盤 (Esc)">✕ 關閉 (Esc)</button>
         </header>
         <div class="stage-jump-search-row">
-          <input type="text" id="stage-jump-filter" placeholder="🔍 輸入關鍵字快速過濾台詞..." autocomplete="off">
+          <label for="stage-jump-filter" class="sr-only">搜尋台詞關鍵字</label>
+          <input type="text" id="stage-jump-filter" placeholder="🔍 輸入關鍵字過濾台詞..." autocomplete="off">
         </div>
         <div class="stage-jump-grid" id="stage-jump-grid">
           ${gridItems}
@@ -274,8 +275,10 @@ function wireEvents(): void {
   })
 
   if (isStageJumpModalOpen) {
+    const modalContent = app.querySelector<HTMLElement>('.stage-jump-modal-content')
     const filterInput = app.querySelector<HTMLInputElement>('#stage-jump-filter')
     filterInput?.focus()
+    
     filterInput?.addEventListener('input', () => {
       const query = filterInput.value.trim().toLowerCase()
       app.querySelectorAll<HTMLElement>('.stage-jump-grid-item').forEach((item) => {
@@ -283,6 +286,24 @@ function wireEvents(): void {
         item.style.display = text.includes(query) ? '' : 'none'
       })
     })
+
+    // Focus trap inside modal for accessibility
+    modalContent?.addEventListener('keydown', (e) => {
+      if (e.key === 'Tab') {
+        const focusables = modalContent.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), [tabindex="0"]')
+        if (focusables.length === 0) return
+        const first = focusables[0]
+        const last = focusables[focusables.length - 1]
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault()
+          last.focus()
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault()
+          first.focus()
+        }
+      }
+    })
+
     const activeItem = app.querySelector<HTMLElement>('.stage-jump-grid-item.active')
     activeItem?.scrollIntoView({ block: 'center', behavior: 'smooth' })
   }
@@ -317,22 +338,22 @@ function handleAction(element: HTMLElement): void {
   if (action === 'add-line' && script) { script.lines.push({ id: makeId(), text: '' }); currentLineIndex = script.lines.length - 1; persist(); render(); scrollToActiveLine(); return }
   if (action === 'select-line') { currentLineIndex = index; render(); scrollToActiveLine(); return }
   if (action === 'play-line') { currentLineIndex = index; render(); scrollToActiveLine(); const line = selectedLine(); if (line) speaker.speak(line.text, state.settings.voiceURI, state.settings.rate, state.settings.pitch); return }
-  if (action === 'jump-first') { currentLineIndex = 0; render(); scrollToActiveLine(); return }
-  if (action === 'jump-last' && script) { currentLineIndex = Math.max(0, script.lines.length - 1); render(); scrollToActiveLine(); return }
-  if (action === 'jump-back-5') { currentLineIndex = Math.max(0, currentLineIndex - 5); render(); scrollToActiveLine(); return }
-  if (action === 'jump-forward-5' && script) { currentLineIndex = Math.min(Math.max(0, script.lines.length - 1), currentLineIndex + 5); render(); scrollToActiveLine(); return }
+  if (action === 'jump-first') { currentLineIndex = 0; render(); scrollToActiveLine(); announce('跳至第一句'); return }
+  if (action === 'jump-last' && script) { currentLineIndex = Math.max(0, script.lines.length - 1); render(); scrollToActiveLine(); announce('跳至最後一句'); return }
+  if (action === 'jump-back-5') { currentLineIndex = Math.max(0, currentLineIndex - 5); render(); scrollToActiveLine(); announce(`後退至第 ${currentLineIndex + 1} 句`); return }
+  if (action === 'jump-forward-5' && script) { currentLineIndex = Math.min(Math.max(0, script.lines.length - 1), currentLineIndex + 5); render(); scrollToActiveLine(); announce(`前進至第 ${currentLineIndex + 1} 句`); return }
   if (action === 'open-stage-jump') { isStageJumpModalOpen = true; render(); return }
   if (action === 'close-stage-jump') { isStageJumpModalOpen = false; render(); return }
-  if (action === 'stage-jump-to') { currentLineIndex = index; isStageJumpModalOpen = false; render(); return }
+  if (action === 'stage-jump-to') { currentLineIndex = index; isStageJumpModalOpen = false; render(); announce(`已跳轉至第 ${index + 1} 句`); return }
   if (action === 'delete-line' && script) { script.lines.splice(index, 1); currentLineIndex = Math.max(0, Math.min(currentLineIndex, script.lines.length - 1)); persist(); render(); return }
   if (action === 'move-line' && script) { const target = index + Number(element.dataset.direction); if (target >= 0 && target < script.lines.length) [script.lines[index], script.lines[target]] = [script.lines[target], script.lines[index]]; currentLineIndex = target; persist(); render(); scrollToActiveLine(); return }
   if (action === 'play' || action === 'replay') { isContinuousPlaying = false; const line = selectedLine(); if (line) speaker.speak(line.text, state.settings.voiceURI, state.settings.rate, state.settings.pitch); return }
   if (action === 'play-continuous') { isContinuousPlaying = true; render(); const line = selectedLine(); if (line) speaker.speak(line.text, state.settings.voiceURI, state.settings.rate, state.settings.pitch); return }
   if (action === 'stop') { isContinuousPlaying = false; speaker.stop(); render(); return }
-  if (action === 'previous') { currentLineIndex = Math.max(0, currentLineIndex - 1); render(); scrollToActiveLine(); return }
-  if (action === 'next') { currentLineIndex = Math.min(Math.max(0, (script?.lines.length ?? 1) - 1), currentLineIndex + 1); render(); scrollToActiveLine(); return }
-  if (action === 'enter-stage') { mode = 'stage'; isLocked = state.settings.stageLockOnEntry; isContinuousPlaying = false; isStageJumpModalOpen = false; speaker.stop(false); render(); return }
-  if (action === 'exit-stage') { mode = 'rehearsal'; isStageJumpModalOpen = false; speaker.stop(false); render(); return }
+  if (action === 'previous') { currentLineIndex = Math.max(0, currentLineIndex - 1); render(); scrollToActiveLine(); announce(`上一句，第 ${currentLineIndex + 1} 句`); return }
+  if (action === 'next') { currentLineIndex = Math.min(Math.max(0, (script?.lines.length ?? 1) - 1), currentLineIndex + 1); render(); scrollToActiveLine(); announce(`下一句，第 ${currentLineIndex + 1} 句`); return }
+  if (action === 'enter-stage') { mode = 'stage'; isLocked = state.settings.stageLockOnEntry; isContinuousPlaying = false; isStageJumpModalOpen = false; speaker.stop(false); render(); announce('進入舞台模式'); return }
+  if (action === 'exit-stage') { mode = 'rehearsal'; isStageJumpModalOpen = false; speaker.stop(false); render(); announce('離開舞台模式，回到排練編輯器'); return }
   if (action === 'toggle-lock') { isLocked = !isLocked; announce(isLocked ? '舞台控制已鎖定。' : '舞台控制已解鎖。'); render(); return }
   if (action === 'speak-rescue') { speaker.speak(state.settings.rescuePhrases[index], state.settings.voiceURI, state.settings.rate, state.settings.pitch); return }
   if (action === 'add-rescue') { const phrase = prompt('新增救援句'); if (phrase?.trim()) { state.settings.rescuePhrases.push(phrase.trim()); persist(); render() }; return }
@@ -341,21 +362,43 @@ function handleAction(element: HTMLElement): void {
 }
 
 function exportJson(): void {
-  const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' })
+  const dateStr = new Date().toISOString().slice(0, 10)
+  const filename = `mic-cue-backup-${dateStr}.json`
+  const jsonStr = JSON.stringify(state, null, 2)
+  const blob = new Blob([jsonStr], { type: 'application/json;charset=utf-8;' })
   const url = URL.createObjectURL(blob)
-  const link = Object.assign(document.createElement('a'), { href: url, download: `mic-cue-${new Date().toISOString().slice(0, 10)}.json` })
-  link.click(); URL.revokeObjectURL(url); announce('JSON 備份已匯出。')
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  URL.revokeObjectURL(url)
+  announce('JSON 安全備份已成功匯出。')
 }
 
 async function importJson(event: Event): Promise<void> {
-  const file = (event.target as HTMLInputElement).files?.[0]
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
   if (!file) return
   try {
-    const imported = validateImportedState(JSON.parse(await file.text()))
-    if (!imported) throw new Error('Invalid file')
-    if (!confirm('匯入會取代這台裝置上的所有 Mic Cue 資料。要繼續嗎？')) return
-    state = imported; currentLineIndex = 0; persist(); announce('JSON 備份已匯入。'); render()
-  } catch { announce('無法匯入：檔案格式不正確。') }
+    const rawText = await file.text()
+    const imported = validateImportedState(rawText)
+    if (!imported) throw new Error('Invalid file format or corrupted structure')
+    if (!confirm('匯入會取代這台裝置上的所有 Mic Cue 資料。要繼續嗎？')) {
+      input.value = ''
+      return
+    }
+    state = imported
+    currentLineIndex = 0
+    persist()
+    announce('JSON 備份已成功匯入與自動升級相容。')
+    render()
+  } catch {
+    announce('無法匯入：檔案格式不正確、檔案過大或內容損毀。')
+  } finally {
+    input.value = ''
+  }
 }
 
 document.addEventListener('keydown', (event) => {

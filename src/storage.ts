@@ -7,7 +7,8 @@ const MAX_RATE = 2
 const MIN_PITCH = 0.5
 const MAX_PITCH = 2
 const MIN_FONT_SCALE = 0.8
-const MAX_FONT_SCALE = 1.6
+const MAX_FONT_SCALE = 2.0
+export const MAX_IMPORT_SIZE_BYTES = 5 * 1024 * 1024 // 5MB limit for security
 
 export const defaultSettings: Settings = {
   voiceURI: '',
@@ -48,35 +49,44 @@ function clampNumber(value: unknown, min: number, max: number, fallback: number)
 }
 
 function sanitizeText(value: unknown): string | null {
-  return isString(value) ? value.trim() : null
+  if (!isString(value)) return null
+  // Strip control characters & dangerous script tag patterns for security
+  const cleaned = value.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '').trim()
+  return cleaned
 }
 
 function sanitizeLine(value: unknown): CueLine | null {
   if (!value || typeof value !== 'object') return null
   const candidate = value as Partial<CueLine>
-  const id = sanitizeText(candidate.id)
+  const id = sanitizeText(candidate.id) ?? makeId()
   const text = sanitizeText(candidate.text)
-  if (!id || text === null) return null
+  if (text === null) return null
   return { id, text }
 }
 
 function sanitizeScript(value: unknown): Script | null {
   if (!value || typeof value !== 'object') return null
   const candidate = value as Partial<Script>
-  const id = sanitizeText(candidate.id)
-  const title = sanitizeText(candidate.title)
-  const updatedAt = sanitizeText(candidate.updatedAt)
-  if (!id || !title || !updatedAt || !Array.isArray(candidate.lines)) return null
-  const lines = candidate.lines.map(sanitizeLine).filter((line): line is CueLine => !!line)
+  const id = sanitizeText(candidate.id) ?? makeId()
+  const title = sanitizeText(candidate.title) || '未命名腳本'
+  const updatedAt = sanitizeText(candidate.updatedAt) || new Date().toISOString()
+  if (!Array.isArray(candidate.lines)) return null
+  const lines = candidate.lines
+    .slice(0, 1000) // Cap max lines per script for DoS protection
+    .map(sanitizeLine)
+    .filter((line): line is CueLine => !!line)
   if (!lines.length) return null
   return { id, title, updatedAt, lines }
 }
 
-function sanitizeSettings(value: unknown): Settings | null {
-  if (!value || typeof value !== 'object') return null
+function sanitizeSettings(value: unknown): Settings {
+  if (!value || typeof value !== 'object') return { ...defaultSettings }
   const candidate = value as Partial<Settings>
   const rescuePhrases = Array.isArray(candidate.rescuePhrases)
-    ? candidate.rescuePhrases.map((phrase) => sanitizeText(phrase)).filter((phrase): phrase is string => phrase !== null)
+    ? candidate.rescuePhrases
+        .slice(0, 100) // Cap max rescue phrases for security
+        .map((phrase) => sanitizeText(phrase))
+        .filter((phrase): phrase is string => phrase !== null && phrase.length > 0)
     : []
   return {
     voiceURI: sanitizeText(candidate.voiceURI) ?? '',
@@ -89,23 +99,37 @@ function sanitizeSettings(value: unknown): Settings | null {
   }
 }
 
+/**
+ * Migration helper: backward & forward version compatibility
+ */
+function migrateState(parsed: Partial<AppState>): AppState | null {
+  if (!parsed || typeof parsed !== 'object') return null
+  if (!Array.isArray(parsed.scripts)) return null
+  
+  const scripts = parsed.scripts
+    .slice(0, 100) // Cap total scripts for DoS safety
+    .map(sanitizeScript)
+    .filter((script): script is Script => !!script)
+  if (!scripts.length) return null
+
+  const settings = sanitizeSettings(parsed.settings)
+  const selectedScriptId = sanitizeText(parsed.selectedScriptId)
+  
+  return {
+    version: CURRENT_VERSION,
+    scripts,
+    selectedScriptId: selectedScriptId && scripts.some((s) => s.id === selectedScriptId) ? selectedScriptId : scripts[0].id,
+    settings
+  }
+}
+
 export function loadState(): AppState {
   try {
     const raw = localStorage.getItem(KEY)
     if (!raw) return freshState()
     const parsed = JSON.parse(raw) as Partial<AppState>
-    if (parsed.version !== CURRENT_VERSION || !Array.isArray(parsed.scripts)) return freshState()
-    const scripts = parsed.scripts.map(sanitizeScript).filter((script): script is Script => !!script)
-    if (!scripts.length) return freshState()
-    const settings = sanitizeSettings(parsed.settings)
-    if (!settings) return freshState()
-    const selectedScriptId = sanitizeText(parsed.selectedScriptId)
-    return {
-      version: CURRENT_VERSION,
-      scripts,
-      selectedScriptId: selectedScriptId && scripts.some((script) => script.id === selectedScriptId) ? selectedScriptId : scripts[0].id,
-      settings
-    }
+    const migrated = migrateState(parsed)
+    return migrated ?? freshState()
   } catch {
     return freshState()
   }
@@ -115,18 +139,15 @@ export function saveState(state: AppState): void {
   localStorage.setItem(KEY, JSON.stringify(state))
 }
 
-export function validateImportedState(value: unknown): AppState | null {
-  if (!value || typeof value !== 'object') return null
-  const candidate = value as Partial<AppState>
-  if (candidate.version !== CURRENT_VERSION || !Array.isArray(candidate.scripts) || !candidate.settings) return null
-  const scripts = candidate.scripts.map(sanitizeScript).filter((script): script is Script => !!script)
-  const settings = sanitizeSettings(candidate.settings)
-  if (!scripts.length || !settings) return null
-  const selectedScriptId = sanitizeText(candidate.selectedScriptId)
-  return {
-    version: CURRENT_VERSION,
-    scripts,
-    selectedScriptId: selectedScriptId && scripts.some((script) => script.id === selectedScriptId) ? selectedScriptId : scripts[0].id,
-    settings
+export function validateImportedState(rawText: string): AppState | null {
+  if (!rawText || rawText.length > MAX_IMPORT_SIZE_BYTES) {
+    return null // Security: Reject oversized JSON files (>5MB)
+  }
+  try {
+    const parsed = JSON.parse(rawText) as Partial<AppState>
+    return migrateState(parsed)
+  } catch {
+    return null
   }
 }
+
