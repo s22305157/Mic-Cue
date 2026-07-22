@@ -17,7 +17,8 @@ export const defaultSettings: Settings = {
   fontScale: 1,
   stageLockOnEntry: false,
   autoAdvance: false,
-  rescuePhrases: ['請給我一秒鐘。', '我想換個方式表達。', '謝謝大家耐心等我。']
+  rescuePhrases: ['請給我一秒鐘。', '我想換個方式表達。', '謝謝大家耐心等我。'],
+  favoriteVoices: []
 }
 
 export function makeId(): string {
@@ -90,17 +91,48 @@ function sanitizeScript(value: unknown): Script | null {
   const lines = candidate.lines
     .slice(0, 1000) // Cap max lines per script for DoS protection
     .map(sanitizeLine)
-    .filter((line): line is CueLine => !!line)
+    .filter((line: CueLine | null): line is CueLine => !!line)
   if (!lines.length) return null
 
   const history = Array.isArray(candidate.history)
     ? candidate.history
         .slice(0, 10)
         .map(sanitizeRevision)
-        .filter((rev): rev is ScriptRevision => !!rev)
+        .filter((rev: ScriptRevision | null): rev is ScriptRevision => !!rev)
     : []
 
-  return { id, title, updatedAt, lines, history }
+  const voiceURI = isString(candidate.voiceURI) ? candidate.voiceURI : undefined
+  const rate = typeof candidate.rate === 'number' ? clampNumber(candidate.rate, MIN_RATE, MAX_RATE, 1) : undefined
+  const pitch = typeof candidate.pitch === 'number' ? clampNumber(candidate.pitch, MIN_PITCH, MAX_PITCH, 1) : undefined
+  const fontScale = typeof candidate.fontScale === 'number' ? clampNumber(candidate.fontScale, MIN_FONT_SCALE, MAX_FONT_SCALE, 1) : undefined
+  const stageLockOnEntry = isBoolean(candidate.stageLockOnEntry) ? candidate.stageLockOnEntry : undefined
+  const autoAdvance = isBoolean(candidate.autoAdvance) ? candidate.autoAdvance : undefined
+
+  return { id, title, updatedAt, lines, history, voiceURI, rate, pitch, fontScale, stageLockOnEntry, autoAdvance }
+}
+
+function sanitizeSettings(value: unknown): Settings {
+  if (!value || typeof value !== 'object') return { ...defaultSettings }
+  const candidate = value as Partial<Settings>
+  const rescuePhrases = Array.isArray(candidate.rescuePhrases)
+    ? candidate.rescuePhrases
+        .slice(0, 100) // Cap max rescue phrases for security
+        .map((phrase) => sanitizeText(phrase))
+        .filter((phrase): phrase is string => phrase !== null && phrase.length > 0)
+    : []
+  const favoriteVoices = Array.isArray(candidate.favoriteVoices)
+    ? candidate.favoriteVoices.map((v) => sanitizeText(v)).filter((v): v is string => v !== null)
+    : []
+  return {
+    voiceURI: sanitizeText(candidate.voiceURI) ?? '',
+    rate: clampNumber(candidate.rate, MIN_RATE, MAX_RATE, defaultSettings.rate),
+    pitch: clampNumber(candidate.pitch, MIN_PITCH, MAX_PITCH, defaultSettings.pitch),
+    fontScale: clampNumber(candidate.fontScale, MIN_FONT_SCALE, MAX_FONT_SCALE, defaultSettings.fontScale),
+    stageLockOnEntry: isBoolean(candidate.stageLockOnEntry) ? candidate.stageLockOnEntry : defaultSettings.stageLockOnEntry,
+    autoAdvance: isBoolean(candidate.autoAdvance) ? candidate.autoAdvance : defaultSettings.autoAdvance,
+    rescuePhrases: rescuePhrases.length ? rescuePhrases : [...defaultSettings.rescuePhrases],
+    favoriteVoices
+  }
 }
 
 export function createScriptSnapshot(script: Script, reason = '內容快照'): ScriptRevision {
@@ -160,26 +192,6 @@ export function calculateBackupDiff(localState: AppState, backupState: AppState)
   }
 }
 
-function sanitizeSettings(value: unknown): Settings {
-  if (!value || typeof value !== 'object') return { ...defaultSettings }
-  const candidate = value as Partial<Settings>
-  const rescuePhrases = Array.isArray(candidate.rescuePhrases)
-    ? candidate.rescuePhrases
-        .slice(0, 100) // Cap max rescue phrases for security
-        .map((phrase) => sanitizeText(phrase))
-        .filter((phrase): phrase is string => phrase !== null && phrase.length > 0)
-    : []
-  return {
-    voiceURI: sanitizeText(candidate.voiceURI) ?? '',
-    rate: clampNumber(candidate.rate, MIN_RATE, MAX_RATE, defaultSettings.rate),
-    pitch: clampNumber(candidate.pitch, MIN_PITCH, MAX_PITCH, defaultSettings.pitch),
-    fontScale: clampNumber(candidate.fontScale, MIN_FONT_SCALE, MAX_FONT_SCALE, defaultSettings.fontScale),
-    stageLockOnEntry: isBoolean(candidate.stageLockOnEntry) ? candidate.stageLockOnEntry : defaultSettings.stageLockOnEntry,
-    autoAdvance: isBoolean(candidate.autoAdvance) ? candidate.autoAdvance : defaultSettings.autoAdvance,
-    rescuePhrases: rescuePhrases.length ? rescuePhrases : [...defaultSettings.rescuePhrases]
-  }
-}
-
 /**
  * Migration helper: backward & forward version compatibility
  */
@@ -231,4 +243,3 @@ export function validateImportedState(rawText: string): AppState | null {
     return null
   }
 }
-

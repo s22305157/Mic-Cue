@@ -72,6 +72,12 @@ button:disabled { opacity: .45; cursor: not-allowed; }.primary { background: #5b
 .history-item-snippet { font-size: .85rem; color: #221a3e; background: white; padding: .4rem .6rem; border-radius: .5rem; border: 1px solid #ece7f5; }
 .history-restore-btn { align-self: flex-end; min-height: 2.1rem; padding: .3rem .8rem; font-size: .85rem; background: #5b36d6; color: white; border-radius: .55rem; }
 
+.script-settings-header { display: flex; align-items: center; justify-content: space-between; gap: .5rem; flex-wrap: wrap; margin-bottom: .2rem; }
+.custom-badge { background: #e0e7ff; color: #3730a3; padding: .1rem .45rem; border-radius: .4rem; font-size: .72rem; font-weight: 800; border: 1px solid #c7d2fe; }
+.default-badge { background: #f3f4f6; color: #4b5563; padding: .1rem .45rem; border-radius: .4rem; font-size: .72rem; font-weight: 800; border: 1px solid #e5e7eb; }
+.small-btn { min-height: 2.1rem; padding: .25rem .55rem; font-size: .8rem; font-weight: 700; background: #eef2ff; color: #4338ca; border-radius: .5rem; cursor: pointer; }
+.small-btn:hover { background: #e0e7ff; }
+
 @media (max-width: 1050px) { .layout { grid-template-columns: minmax(12rem, .7fr) 1.3fr; }.controls { grid-column: 1 / -1; grid-template-columns: repeat(3, 1fr); }.controls section { align-content: start; } }
 @media (max-width: 720px) { .topbar { display: grid; }.top-actions { display: grid; grid-template-columns: 1fr 1fr; }.top-actions .primary { grid-column: 1 / -1; }.layout { display: flex; flex-direction: column; padding: .7rem; }.sidebar ul { display: flex; overflow-x: auto; gap: .4rem; }.sidebar li { flex: 0 0 10rem; }.controls { display: grid; grid-template-columns: 1fr; }.script-title-row { align-items: end; }.stage-header { grid-template-columns: 1fr 1fr; }.stage-header p { grid-column: 1 / -1; grid-row: 1; }.stage-header button:first-child { grid-column: 1; grid-row: 2; }.stage-header button:last-child { grid-column: 2; grid-row: 2; }.stage-controls { grid-template-columns: repeat(3, 1fr); }.stage-controls button { min-height: 4.7rem; }.stage-shell { grid-template-rows: auto 1fr auto auto auto; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; } }

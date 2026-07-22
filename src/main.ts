@@ -74,6 +74,47 @@ function touchScript(id: string | null): void {
   }
 }
 
+function getScriptVoice(script?: Script): string {
+  return script?.voiceURI ?? state.settings.voiceURI ?? ''
+}
+function getScriptRate(script?: Script): number {
+  return script?.rate ?? state.settings.rate ?? 1
+}
+function getScriptPitch(script?: Script): number {
+  return script?.pitch ?? state.settings.pitch ?? 1
+}
+function getScriptFontScale(script?: Script): number {
+  return script?.fontScale ?? state.settings.fontScale ?? 1
+}
+function getScriptAutoAdvance(script?: Script): boolean {
+  return script?.autoAdvance ?? state.settings.autoAdvance ?? false
+}
+function getScriptLockOnEntry(script?: Script): boolean {
+  return script?.stageLockOnEntry ?? state.settings.stageLockOnEntry ?? false
+}
+
+function hasCustomSettings(script?: Script): boolean {
+  if (!script) return false
+  return script.voiceURI !== undefined || script.rate !== undefined || script.pitch !== undefined || script.fontScale !== undefined || script.autoAdvance !== undefined || script.stageLockOnEntry !== undefined
+}
+
+function renderVoiceSelectOptions(selectedUri: string): string {
+  const favorites = state.settings.favoriteVoices ?? []
+  const favoriteList = speaker.voices.filter((v) => favorites.includes(v.voiceURI))
+  const otherList = speaker.voices.filter((v) => !favorites.includes(v.voiceURI))
+
+  let html = `<option value="">系統預設 (Global Default)</option>`
+  if (favoriteList.length > 0) {
+    html += `<optgroup label="⭐ 常用語音列表">`
+    html += favoriteList.map((v) => `<option value="${escapeHtml(v.voiceURI)}" ${v.voiceURI === selectedUri ? 'selected' : ''}>⭐ ${escapeHtml(v.name)} (${v.lang})</option>`).join('')
+    html += `</optgroup>`
+  }
+  html += `<optgroup label="所有語音">`
+  html += otherList.map((v) => `<option value="${escapeHtml(v.voiceURI)}" ${v.voiceURI === selectedUri ? 'selected' : ''}>${escapeHtml(v.name)} (${v.lang})</option>`).join('')
+  html += `</optgroup>`
+  return html
+}
+
 function selectedLine(): CueLine | undefined {
   return selectedScript()?.lines[currentLineIndex]
 }
@@ -139,6 +180,14 @@ function rehearsalTemplate(script: Script | undefined, current: CueLine | undefi
       </div>
     </li>`).join('') ?? ''
 
+  const currentVoice = getScriptVoice(script)
+  const currentRate = getScriptRate(script)
+  const currentPitch = getScriptPitch(script)
+  const currentFontScale = getScriptFontScale(script)
+  const currentAutoAdvance = getScriptAutoAdvance(script)
+  const currentLockOnEntry = getScriptLockOnEntry(script)
+  const isFav = (state.settings.favoriteVoices ?? []).includes(currentVoice)
+
   return `
     <header class="topbar"><div><h1>Mic Cue</h1><p>文字轉語音提示卡</p></div><div class="top-actions"><button data-action="export">匯出 JSON 備份</button><label class="button-like">匯入 JSON 備份<input id="import-file" type="file" accept="application/json" hidden></label><button class="primary" data-action="enter-stage">進入舞台模式</button></div></header>
     <main id="main-content" class="layout">
@@ -183,12 +232,22 @@ function rehearsalTemplate(script: Script | undefined, current: CueLine | undefi
             <button data-action="next">下一句 ${icon('next')}</button>
           </div>
         </section>
-        <section><h2>語音設定</h2><label>語音<select id="voice-select"><option value="">系統預設</option>${speaker.voices.map((voice) => `<option value="${escapeHtml(voice.voiceURI)}" ${voice.voiceURI === state.settings.voiceURI ? 'selected' : ''}>${escapeHtml(voice.name)} (${voice.lang})</option>`).join('')}</select></label>
-          <label>語速 <output>${state.settings.rate.toFixed(1)}×</output><input id="rate" type="range" min="0.5" max="2" step="0.1" value="${state.settings.rate}"></label>
-          <label>音調 <output>${state.settings.pitch.toFixed(1)}</output><input id="pitch" type="range" min="0.5" max="2" step="0.1" value="${state.settings.pitch}"></label>
-          <label>文字大小 <output>${state.settings.fontScale.toFixed(1)}×</output><input id="font-scale" type="range" min="0.8" max="2.0" step="0.1" value="${state.settings.fontScale}"></label>
-          <label class="checkbox"><input id="auto-advance" type="checkbox" ${state.settings.autoAdvance ? 'checked' : ''}> 啟用連續朗讀模式 (單句播放完自動接續下一句)</label>
-          <label class="checkbox"><input id="lock-on-entry" type="checkbox" ${state.settings.stageLockOnEntry ? 'checked' : ''}> 進入舞台模式時啟用 Stage Lock</label>
+        <section>
+          <div class="script-settings-header">
+            <h2>語音與舞台設定</h2>
+            ${hasCustomSettings(script) ? '<span class="custom-badge">獨立腳本設定</span><button class="small-btn" data-action="reset-script-settings" title="重置此腳本設定為全域預設">↺ 重置設定</button>' : '<span class="default-badge">跟隨全域預設</span>'}
+          </div>
+          <label>語音引擎
+            <div style="display:flex; gap:.4rem; align-items:center;">
+              <select id="voice-select" style="flex:1;">${renderVoiceSelectOptions(currentVoice)}</select>
+              <button data-action="toggle-favorite-voice" class="small-btn" style="flex-shrink:0;" title="將當前選擇語音加入／移除常用列表">${isFav ? '★ 已常用' : '☆ 設常用'}</button>
+            </div>
+          </label>
+          <label>語速 <output>${currentRate.toFixed(1)}×</output><input id="rate" type="range" min="0.5" max="2" step="0.1" value="${currentRate}"></label>
+          <label>音調 <output>${currentPitch.toFixed(1)}</output><input id="pitch" type="range" min="0.5" max="2" step="0.1" value="${currentPitch}"></label>
+          <label>文字大小 <output>${currentFontScale.toFixed(1)}×</output><input id="font-scale" type="range" min="0.8" max="2.0" step="0.1" value="${currentFontScale}"></label>
+          <label class="checkbox"><input id="auto-advance" type="checkbox" ${currentAutoAdvance ? 'checked' : ''}> 啟用此腳本連續朗讀模式</label>
+          <label class="checkbox"><input id="lock-on-entry" type="checkbox" ${currentLockOnEntry ? 'checked' : ''}> 進入舞台模式時啟用 Stage Lock</label>
         </section>
         <section><h2>常用救援句</h2><ul class="rescue-list">${state.settings.rescuePhrases.map((phrase, index) => `<li><button data-action="speak-rescue" data-index="${index}">${escapeHtml(phrase)}</button><button data-action="delete-rescue" data-index="${index}" aria-label="刪除救援句">×</button></li>`).join('')}</ul><button data-action="add-rescue">新增救援句</button></section>
         <p class="shortcut-help">快捷鍵：空白鍵播放／重播，Home / End 跳至首尾句，← 上一句，→ 下一句，S 停止，L 鎖定舞台。</p>
@@ -302,7 +361,8 @@ function scriptHistoryModalTemplate(script: Script | undefined): string {
 
 function stageTemplate(script: Script | undefined, current: CueLine | undefined, next: CueLine | undefined): string {
   const total = script?.lines.length ?? 0
-  return `<main id="main-content" class="stage-shell" style="--cue-scale:${state.settings.fontScale}">
+  const fontScale = getScriptFontScale(script)
+  return `<main id="main-content" class="stage-shell" style="--cue-scale:${fontScale}">
     <header class="stage-header">
       <button data-action="exit-stage">離開舞台模式</button>
       <p>${escapeHtml(script?.title ?? 'Mic Cue')}</p>
@@ -448,16 +508,47 @@ function wireEvents(): void {
     activeItem?.scrollIntoView({ block: 'center', behavior: 'smooth' })
   }
 
-  bindSetting('voice-select', (value) => { state.settings.voiceURI = value })
-  bindSetting('rate', (value) => { state.settings.rate = Number(value) })
-  bindSetting('pitch', (value) => { state.settings.pitch = Number(value) })
-  bindSetting('font-scale', (value) => { state.settings.fontScale = Number(value) })
+  bindSetting('voice-select', (value) => {
+    const script = selectedScript()
+    if (script) script.voiceURI = value
+    state.settings.voiceURI = value
+  })
+  bindSetting('rate', (value) => {
+    const num = Number(value)
+    const script = selectedScript()
+    if (script) script.rate = num
+    state.settings.rate = num
+  })
+  bindSetting('pitch', (value) => {
+    const num = Number(value)
+    const script = selectedScript()
+    if (script) script.pitch = num
+    state.settings.pitch = num
+  })
+  bindSetting('font-scale', (value) => {
+    const num = Number(value)
+    const script = selectedScript()
+    if (script) script.fontScale = num
+    state.settings.fontScale = num
+  })
   
   const autoAdvance = app.querySelector<HTMLInputElement>('#auto-advance')
-  autoAdvance?.addEventListener('change', () => { state.settings.autoAdvance = autoAdvance.checked; persist(); render() })
+  autoAdvance?.addEventListener('change', () => {
+    const script = selectedScript()
+    if (script) script.autoAdvance = autoAdvance.checked
+    state.settings.autoAdvance = autoAdvance.checked
+    persist()
+    render()
+  })
 
   const lockOnEntry = app.querySelector<HTMLInputElement>('#lock-on-entry')
-  lockOnEntry?.addEventListener('change', () => { state.settings.stageLockOnEntry = lockOnEntry.checked; persist() })
+  lockOnEntry?.addEventListener('change', () => {
+    const script = selectedScript()
+    if (script) script.stageLockOnEntry = lockOnEntry.checked
+    state.settings.stageLockOnEntry = lockOnEntry.checked
+    persist()
+    render()
+  })
   
   app.querySelector<HTMLInputElement>('#import-file')?.addEventListener('change', importJson)
 }
@@ -477,7 +568,7 @@ function handleAction(element: HTMLElement): void {
   if (action === 'delete-script' && script && confirm(`刪除「${script.title}」？`)) { state.scripts = state.scripts.filter((item) => item.id !== script.id); state.selectedScriptId = getSortedScripts()[0]?.id ?? null; currentLineIndex = 0; persist(); render(); return }
   if (action === 'add-line' && script) { recordScriptHistory(script, '新增台詞'); script.lines.push({ id: makeId(), text: '' }); touchScript(script.id); currentLineIndex = script.lines.length - 1; render(); scrollToActiveLine(); return }
   if (action === 'select-line') { currentLineIndex = index; render(); scrollToActiveLine(); return }
-  if (action === 'play-line') { currentLineIndex = index; render(); scrollToActiveLine(); const line = selectedLine(); if (line) speaker.speak(line.text, state.settings.voiceURI, state.settings.rate, state.settings.pitch); return }
+  if (action === 'play-line') { currentLineIndex = index; render(); scrollToActiveLine(); const line = selectedLine(); if (line) speaker.speak(line.text, getScriptVoice(script), getScriptRate(script), getScriptPitch(script)); return }
   if (action === 'jump-first') { currentLineIndex = 0; render(); scrollToActiveLine(); announce('跳至第一句'); return }
   if (action === 'jump-last' && script) { currentLineIndex = Math.max(0, script.lines.length - 1); render(); scrollToActiveLine(); announce('跳至最後一句'); return }
   if (action === 'jump-back-5') { currentLineIndex = Math.max(0, currentLineIndex - 5); render(); scrollToActiveLine(); announce(`後退至第 ${currentLineIndex + 1} 句`); return }
@@ -487,15 +578,15 @@ function handleAction(element: HTMLElement): void {
   if (action === 'stage-jump-to') { currentLineIndex = index; isStageJumpModalOpen = false; render(); announce(`已跳轉至第 ${index + 1} 句`); return }
   if (action === 'delete-line' && script) { recordScriptHistory(script, '刪除台詞'); script.lines.splice(index, 1); currentLineIndex = Math.max(0, Math.min(currentLineIndex, script.lines.length - 1)); touchScript(script.id); render(); return }
   if (action === 'move-line' && script) { recordScriptHistory(script, '調整台詞順序'); const target = index + Number(element.dataset.direction); if (target >= 0 && target < script.lines.length) [script.lines[index], script.lines[target]] = [script.lines[target], script.lines[index]]; currentLineIndex = target; touchScript(script.id); render(); scrollToActiveLine(); return }
-  if (action === 'play' || action === 'replay') { isContinuousPlaying = false; const line = selectedLine(); if (line) speaker.speak(line.text, state.settings.voiceURI, state.settings.rate, state.settings.pitch); return }
-  if (action === 'play-continuous') { isContinuousPlaying = true; render(); const line = selectedLine(); if (line) speaker.speak(line.text, state.settings.voiceURI, state.settings.rate, state.settings.pitch); return }
+  if (action === 'play' || action === 'replay') { isContinuousPlaying = false; const line = selectedLine(); if (line) speaker.speak(line.text, getScriptVoice(script), getScriptRate(script), getScriptPitch(script)); return }
+  if (action === 'play-continuous') { isContinuousPlaying = true; render(); const line = selectedLine(); if (line) speaker.speak(line.text, getScriptVoice(script), getScriptRate(script), getScriptPitch(script)); return }
   if (action === 'stop') { isContinuousPlaying = false; speaker.stop(); render(); return }
   if (action === 'previous') { currentLineIndex = Math.max(0, currentLineIndex - 1); render(); scrollToActiveLine(); announce(`上一句，第 ${currentLineIndex + 1} 句`); return }
   if (action === 'next') { currentLineIndex = Math.min(Math.max(0, (script?.lines.length ?? 1) - 1), currentLineIndex + 1); render(); scrollToActiveLine(); announce(`下一句，第 ${currentLineIndex + 1} 句`); return }
-  if (action === 'enter-stage') { mode = 'stage'; isLocked = state.settings.stageLockOnEntry; isContinuousPlaying = false; isStageJumpModalOpen = false; speaker.stop(false); render(); announce('進入舞台模式'); return }
+  if (action === 'enter-stage') { mode = 'stage'; isLocked = getScriptLockOnEntry(script); isContinuousPlaying = false; isStageJumpModalOpen = false; speaker.stop(false); render(); announce('進入舞台模式'); return }
   if (action === 'exit-stage') { mode = 'rehearsal'; isStageJumpModalOpen = false; speaker.stop(false); render(); announce('離開舞台模式，回到排練編輯器'); return }
   if (action === 'toggle-lock') { isLocked = !isLocked; announce(isLocked ? '舞台控制已鎖定。' : '舞台控制已解鎖。'); render(); return }
-  if (action === 'speak-rescue') { speaker.speak(state.settings.rescuePhrases[index], state.settings.voiceURI, state.settings.rate, state.settings.pitch); return }
+  if (action === 'speak-rescue') { speaker.speak(state.settings.rescuePhrases[index], getScriptVoice(script), getScriptRate(script), getScriptPitch(script)); return }
   if (action === 'add-rescue') { const phrase = prompt('新增救援句'); if (phrase?.trim()) { state.settings.rescuePhrases.push(phrase.trim()); persist(); render() }; return }
   if (action === 'delete-rescue') { state.settings.rescuePhrases.splice(index, 1); persist(); render(); return }
   if (action === 'export') exportJson()
@@ -513,6 +604,37 @@ function handleAction(element: HTMLElement): void {
     persist()
     render()
     announce(`已成功將腳本回復至「${rev.title}」快照！`)
+    return
+  }
+
+  if (action === 'reset-script-settings' && script) {
+    delete script.voiceURI
+    delete script.rate
+    delete script.pitch
+    delete script.fontScale
+    delete script.autoAdvance
+    delete script.stageLockOnEntry
+    persist()
+    render()
+    announce('已成功重置此腳本至全域設定！')
+    return
+  }
+
+  if (action === 'toggle-favorite-voice') {
+    if (!state.settings.favoriteVoices) state.settings.favoriteVoices = []
+    const voice = getScriptVoice(script)
+    if (!voice) return
+    const favs = state.settings.favoriteVoices
+    const idx = favs.indexOf(voice)
+    if (idx >= 0) {
+      favs.splice(idx, 1)
+      announce('已從常用語音清單中移除。')
+    } else {
+      favs.push(voice)
+      announce('已加入常用語音清單！')
+    }
+    persist()
+    render()
     return
   }
 
@@ -594,7 +716,7 @@ document.addEventListener('keydown', (event) => {
     if (isScriptHistoryModalOpen) { isScriptHistoryModalOpen = false; render(); return }
   }
   if ((event.target as HTMLElement).matches('input, textarea, select')) return
-  if (event.key === ' ' || event.key === 'Enter') { event.preventDefault(); const line = selectedLine(); if (line && !isLocked) speaker.speak(line.text, state.settings.voiceURI, state.settings.rate, state.settings.pitch) }
+  if (event.key === ' ' || event.key === 'Enter') { event.preventDefault(); const line = selectedLine(); const script = selectedScript(); if (line && !isLocked) speaker.speak(line.text, getScriptVoice(script), getScriptRate(script), getScriptPitch(script)) }
   if (event.key === 'Home' && !isLocked) { currentLineIndex = 0; render(); scrollToActiveLine() }
   if (event.key === 'End' && !isLocked) { const count = selectedScript()?.lines.length ?? 0; currentLineIndex = Math.max(0, count - 1); render(); scrollToActiveLine() }
   if (event.key === 'PageUp' && !isLocked) { currentLineIndex = Math.max(0, currentLineIndex - 5); render(); scrollToActiveLine() }
