@@ -205,7 +205,23 @@ function stageTemplate(script: Script | undefined, current: CueLine | undefined,
       <button data-action="stop">${icon('stop')}<span>停止</span></button>
       <button data-action="next" ${isLocked ? 'disabled' : ''}>${icon('next')}<span>下一句</span></button>
     </section>
-    ${isLocked ? '<p class="lock-note">舞台控制已鎖定。按右上角「已鎖定」進行明確解鎖；停止鍵仍可使用。</p>' : ''}
+    ${isLocked ? '<p class="lock-note">舞台控制已鎖定。按右上角「已鎖定」進行明確解鎖；停止鍵與救援句仍可使用。</p>' : ''}
+
+    ${state.settings.rescuePhrases.length > 0 ? `
+      <section class="stage-rescue" aria-label="舞台常用救援句">
+        <div class="stage-rescue-header">
+          <span>🆘 常用救援句</span>
+        </div>
+        <div class="stage-rescue-list">
+          ${state.settings.rescuePhrases.map((phrase, idx) => `
+            <button class="stage-rescue-btn" data-action="speak-rescue" data-index="${idx}" title="緊急播放救援句：${escapeHtml(phrase)}">
+              <span class="rescue-icon">🆘</span>
+              <span class="rescue-text">${escapeHtml(phrase)}</span>
+            </button>
+          `).join('')}
+        </div>
+      </section>
+    ` : ''}
 
     ${isStageJumpModalOpen ? stageJumpModalTemplate(script) : ''}
   </main>`
