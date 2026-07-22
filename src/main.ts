@@ -55,6 +55,19 @@ function selectedScript(): Script | undefined {
   return state.scripts.find((script) => script.id === state.selectedScriptId)
 }
 
+function getSortedScripts(): Script[] {
+  return [...state.scripts].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+}
+
+function touchScript(id: string | null): void {
+  if (!id) return
+  const script = state.scripts.find((s) => s.id === id)
+  if (script) {
+    script.updatedAt = new Date().toISOString()
+    persist()
+  }
+}
+
 function selectedLine(): CueLine | undefined {
   return selectedScript()?.lines[currentLineIndex]
 }
@@ -86,8 +99,9 @@ function scrollToActiveLine(): void {
 }
 
 function render(): void {
+  const sorted = getSortedScripts()
   const script = selectedScript()
-  if (!script && state.scripts.length) state.selectedScriptId = state.scripts[0].id
+  if (!script && sorted.length) state.selectedScriptId = sorted[0].id
   const active = selectedScript()
   const current = selectedLine()
   const next = nextLine()
@@ -97,9 +111,14 @@ function render(): void {
 }
 
 function rehearsalTemplate(script: Script | undefined, current: CueLine | undefined): string {
-  const scriptItems = state.scripts.map((item) => `
+  const sortedScripts = getSortedScripts()
+  const scriptItems = sortedScripts.map((item, idx) => `
     <li><button class="script-item ${item.id === state.selectedScriptId ? 'selected' : ''}" data-action="select-script" data-id="${item.id}" aria-current="${item.id === state.selectedScriptId}">
-      <span>${escapeHtml(item.title)}</span><small>${item.lines.length} 句</small>
+      <div class="script-item-main">
+        <span class="script-item-title">${escapeHtml(item.title)}</span>
+        ${idx === 0 ? '<span class="pinned-badge">📌 最近使用</span>' : ''}
+      </div>
+      <small>${item.lines.length} 句</small>
     </button></li>`).join('')
   
   const lines = script?.lines.map((line, index) => `
@@ -333,9 +352,9 @@ function handleAction(element: HTMLElement): void {
   const index = Number(element.dataset.index)
 
   if (action === 'new-script') { const id = makeId(); state.scripts.unshift({ id, title: '未命名腳本', lines: [], updatedAt: new Date().toISOString() }); state.selectedScriptId = id; currentLineIndex = 0; persist(); render(); return }
-  if (action === 'select-script') { state.selectedScriptId = element.dataset.id ?? null; currentLineIndex = 0; persist(); render(); return }
-  if (action === 'delete-script' && script && confirm(`刪除「${script.title}」？`)) { state.scripts = state.scripts.filter((item) => item.id !== script.id); state.selectedScriptId = state.scripts[0]?.id ?? null; currentLineIndex = 0; persist(); render(); return }
-  if (action === 'add-line' && script) { script.lines.push({ id: makeId(), text: '' }); currentLineIndex = script.lines.length - 1; persist(); render(); scrollToActiveLine(); return }
+  if (action === 'select-script') { const id = element.dataset.id ?? null; touchScript(id); state.selectedScriptId = id; currentLineIndex = 0; render(); return }
+  if (action === 'delete-script' && script && confirm(`刪除「${script.title}」？`)) { state.scripts = state.scripts.filter((item) => item.id !== script.id); state.selectedScriptId = getSortedScripts()[0]?.id ?? null; currentLineIndex = 0; persist(); render(); return }
+  if (action === 'add-line' && script) { script.lines.push({ id: makeId(), text: '' }); touchScript(script.id); currentLineIndex = script.lines.length - 1; render(); scrollToActiveLine(); return }
   if (action === 'select-line') { currentLineIndex = index; render(); scrollToActiveLine(); return }
   if (action === 'play-line') { currentLineIndex = index; render(); scrollToActiveLine(); const line = selectedLine(); if (line) speaker.speak(line.text, state.settings.voiceURI, state.settings.rate, state.settings.pitch); return }
   if (action === 'jump-first') { currentLineIndex = 0; render(); scrollToActiveLine(); announce('跳至第一句'); return }
