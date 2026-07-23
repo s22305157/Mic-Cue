@@ -134,20 +134,21 @@ function rehearsalTemplate(script: Script | undefined, current: CueLine | undefi
 
   const lines = script?.lines.map((line, index) => `
     <li class="line-card ${index === currentLineIndex ? 'active' : ''}" data-line-index="${index}">
-      <div class="line-card-top">
+      <div class="line-card-side">
         <button class="line-num-badge" data-action="select-line" data-index="${index}" title="選取第 ${index + 1} 句" aria-label="選取第 ${index + 1} 句">${index + 1}</button>
-        <div class="line-btn-group">
+        <button class="btn-icon" data-action="move-line" data-index="${index}" data-direction="-1" ${index === 0 ? 'disabled' : ''} title="上移台詞" aria-label="上移台詞">${icon('up')}</button>
+        <button class="btn-icon" data-action="move-line" data-index="${index}" data-direction="1" ${index === (script.lines.length - 1) ? 'disabled' : ''} title="下移台詞" aria-label="下移台詞">${icon('down')}</button>
+        <button class="btn-icon btn-delete" data-action="delete-line" data-index="${index}" title="刪除台詞" aria-label="刪除台詞">${icon('delete')}</button>
+      </div>
+
+      <div class="line-card-main">
+        <div class="line-card-top">
           <button class="btn-play" data-action="play-line" data-index="${index}" title="從第 ${index + 1} 句開始播放" aria-label="播放第 ${index + 1} 句">${icon('play')} 播放</button>
           <button class="btn-marker ${line.isMarker ? 'active' : ''}" data-action="toggle-line-marker" data-index="${index}" title="${line.isMarker ? '取消標記點' : '設為標記點 (⭐ 快速跳轉)'}">
             ${line.isMarker ? '🚩 標記點' : '🏳️ 設標記'}
           </button>
-          <button class="btn-icon" data-action="move-line" data-index="${index}" data-direction="-1" ${index === 0 ? 'disabled' : ''} title="上移台詞" aria-label="上移台詞">${icon('up')}</button>
-          <button class="btn-icon" data-action="move-line" data-index="${index}" data-direction="1" ${index === (script.lines.length - 1) ? 'disabled' : ''} title="下移台詞" aria-label="下移台詞">${icon('down')}</button>
-          <button class="btn-icon btn-delete" data-action="delete-line" data-index="${index}" title="刪除台詞" aria-label="刪除台詞">${icon('delete')}</button>
         </div>
-      </div>
 
-      <div class="line-card-body">
         <textarea data-line-id="${line.id}" aria-label="第 ${index + 1} 句台詞" placeholder="請在此輸入台詞內容...">${escapeHtml(line.text)}</textarea>
 
         ${line.isMarker ? `

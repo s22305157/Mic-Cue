@@ -198,63 +198,100 @@ input, select, textarea {
   gap: 0.85rem;
 }
 
-/* Redesigned Line Card */
+/* Redesigned Line Card: Left Vertical Action Strip + Indented Main Content Area */
 .line-card {
-  display: flex;
-  flex-direction: column;
-  gap: 0.6rem;
-  padding: 0.85rem;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.85rem;
+  padding: 0.9rem;
   border: 1px solid #e2e8f0;
-  border-radius: 0.9rem;
+  border-radius: 1rem;
   background: #ffffff;
   transition: all 0.2s ease;
+  align-items: start;
 }
 
 .line-card.active {
   border: 2px solid #5b36d6;
   background: #fcfaff;
-  box-shadow: 0 4px 16px rgba(91, 54, 214, 0.08);
+  box-shadow: 0 4px 18px rgba(91, 54, 214, 0.09);
+}
+
+/* Left Vertical Action Strip */
+.line-card-side {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.45rem;
+  flex-shrink: 0;
+}
+
+.line-num-badge {
+  min-width: 3.2rem !important;
+  height: 3.2rem !important;
+  font-size: 1.35rem !important;
+  font-weight: 900 !important;
+  background: #5b36d6 !important;
+  color: #ffffff !important;
+  border-radius: 0.8rem !important;
+  border: 0 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  box-shadow: 0 3px 10px rgba(91, 54, 214, 0.25) !important;
+  cursor: pointer !important;
+}
+
+.btn-icon {
+  width: 2.6rem !important;
+  height: 2.6rem !important;
+  min-height: 2.6rem !important;
+  min-width: 2.6rem !important;
+  padding: 0 !important;
+  background: #f1f5f9 !important;
+  color: #334155 !important;
+  border-radius: 0.65rem !important;
+  font-weight: 800 !important;
+  font-size: 1.05rem !important;
+  border: 0 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  cursor: pointer !important;
+  transition: all 0.15s ease !important;
+}
+
+.btn-icon:hover:not(:disabled) {
+  background: #e2e8f0 !important;
+  color: #0f172a !important;
+}
+
+.btn-delete:hover:not(:disabled) {
+  background: #fee2e2 !important;
+  color: #dc2626 !important;
+}
+
+/* Right Main Area (Retreated / Indented to the right) */
+.line-card-main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  min-width: 0;
 }
 
 .line-card-top {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.5rem;
   flex-wrap: wrap;
-  justify-content: flex-start !important;
-}
-
-.line-num-badge {
-  min-width: 3.5rem !important;
-  height: 3.5rem !important;
-  font-size: 1.4rem !important;
-  font-weight: 900 !important;
-  background: #5b36d6 !important;
-  color: #ffffff !important;
-  border-radius: 0.85rem !important;
-  border: 0 !important;
-  display: inline-flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  flex-shrink: 0 !important;
-  cursor: pointer !important;
-  box-shadow: 0 4px 12px rgba(91, 54, 214, 0.3) !important;
-}
-
-.line-btn-group {
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-  flex-wrap: wrap;
-  justify-content: flex-start !important;
 }
 
 .btn-play {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
-  min-height: 2.6rem;
-  padding: 0 0.9rem;
+  min-height: 2.5rem;
+  padding: 0 0.95rem;
   background: #e0f2fe;
   color: #0369a1;
   border-radius: 0.7rem;
@@ -272,8 +309,8 @@ input, select, textarea {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
-  min-height: 2.6rem;
-  padding: 0 0.85rem;
+  min-height: 2.5rem;
+  padding: 0 0.9rem;
   background: #fef3c7;
   color: #92400e;
   border: 1px solid #fde047;
@@ -290,33 +327,6 @@ input, select, textarea {
   background: #d97706;
   color: white;
   border-color: #b45309;
-}
-
-.btn-icon {
-  min-height: 2.6rem;
-  min-width: 2.6rem;
-  padding: 0 0.75rem;
-  background: #f1f5f9;
-  color: #334155;
-  border-radius: 0.7rem;
-  font-weight: 800;
-  font-size: 1rem;
-  border: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.btn-delete:hover {
-  background: #fee2e2;
-  color: #dc2626;
-}
-
-.line-card-body {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  margin-left: 0.2rem;
 }
 
 .line-card textarea {
