@@ -16,6 +16,26 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 
+.skip-link {
+  position: absolute;
+  top: -9999px;
+  left: -9999px;
+  background: #5b36d6;
+  color: white;
+  padding: 0.6rem 1.2rem;
+  border-radius: 0 0 0.8rem 0;
+  font-weight: 800;
+  z-index: 9999;
+  text-decoration: none;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+
+.skip-link:focus, .skip-link:focus-visible {
+  top: 0;
+  left: 0;
+  outline: 3px solid #ffbc42;
+}
+
 button, input, select, textarea {
   font: inherit;
   font-size: 1rem;
