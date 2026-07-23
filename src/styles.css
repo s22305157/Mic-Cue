@@ -88,9 +88,9 @@ button:disabled {
 
 .layout {
   display: grid;
-  grid-template-columns: minmax(13rem, 0.7fr) minmax(20rem, 1.4fr) minmax(17rem, 0.9fr);
+  grid-template-columns: minmax(14rem, 0.7fr) minmax(26rem, 2.2fr) minmax(17rem, 1fr);
   gap: 1.25rem;
-  max-width: 1550px;
+  max-width: 1650px;
   padding: 1.25rem;
   margin: auto;
 }
@@ -307,14 +307,22 @@ input, select, textarea {
 
 .line-card textarea {
   width: 100%;
-  min-height: 4.8rem;
-  font-size: 1rem;
-  line-height: 1.5;
-  padding: 0.75rem;
-  border: 1px solid #cbd5e1;
-  border-radius: 0.65rem;
+  min-height: 5.5rem;
+  font-size: 1.05rem;
+  line-height: 1.6;
+  padding: 0.85rem 1rem;
+  border: 1.5px solid #cbd5e1;
+  border-radius: 0.75rem;
   background: #ffffff;
+  color: #0f172a;
   resize: vertical;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.line-card textarea:focus {
+  border-color: #5b36d6;
+  box-shadow: 0 0 0 3px rgba(91, 54, 214, 0.15);
+  outline: none;
 }
 
 .line-marker-tag {
