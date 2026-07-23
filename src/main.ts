@@ -135,41 +135,41 @@ function rehearsalTemplate(script: Script | undefined, current: CueLine | undefi
   const lines = script?.lines.map((line, index) => `
     <li class="line-card ${index === currentLineIndex ? 'active' : ''}" data-line-index="${index}">
       <div class="line-card-header">
-        <div class="line-card-meta">
-          <button class="line-select" data-action="select-line" data-index="${index}" title="選取第 ${index + 1} 句" aria-label="選取第 ${index + 1} 句">${index + 1}</button>
+        <button class="line-select" data-action="select-line" data-index="${index}" title="選取第 ${index + 1} 句" aria-label="選取第 ${index + 1} 句">${index + 1}</button>
+        <div class="line-card-toolbar">
           <button class="line-play-btn" data-action="play-line" data-index="${index}" title="從第 ${index + 1} 句開始播放" aria-label="播放第 ${index + 1} 句">${icon('play')} 播放</button>
           <button class="line-marker-btn ${line.isMarker ? 'active' : ''}" data-action="toggle-line-marker" data-index="${index}" title="${line.isMarker ? '取消標記點' : '設為標記點 (⭐ 快速跳轉)'}">
             ${line.isMarker ? '🚩 標記點' : '🏳️ 設標記'}
           </button>
-        </div>
-        <div class="line-actions">
-          <button data-action="move-line" data-index="${index}" data-direction="-1" ${index === 0 ? 'disabled' : ''} aria-label="上移台詞">${icon('up')}</button>
-          <button data-action="move-line" data-index="${index}" data-direction="1" ${index === (script.lines.length - 1) ? 'disabled' : ''} aria-label="下移台詞">${icon('down')}</button>
-          <button data-action="delete-line" data-index="${index}" aria-label="刪除台詞">${icon('delete')}</button>
+          <button class="line-action-btn" data-action="move-line" data-index="${index}" data-direction="-1" ${index === 0 ? 'disabled' : ''} title="上移台詞" aria-label="上移台詞">${icon('up')}</button>
+          <button class="line-action-btn" data-action="move-line" data-index="${index}" data-direction="1" ${index === (script.lines.length - 1) ? 'disabled' : ''} title="下移台詞" aria-label="下移台詞">${icon('down')}</button>
+          <button class="line-action-btn danger-icon" data-action="delete-line" data-index="${index}" title="刪除台詞" aria-label="刪除台詞">${icon('delete')}</button>
         </div>
       </div>
 
-      <textarea data-line-id="${line.id}" aria-label="第 ${index + 1} 句台詞" placeholder="請在此輸入台詞內容...">${escapeHtml(line.text)}</textarea>
+      <div class="line-card-body">
+        <textarea data-line-id="${line.id}" aria-label="第 ${index + 1} 句台詞" placeholder="請在此輸入台詞內容...">${escapeHtml(line.text)}</textarea>
 
-      ${line.isMarker ? `
-        <div class="line-marker-tag">
-          <span class="marker-flag">🚩 標記名稱:</span>
-          <input class="line-marker-label" data-action="edit-marker-label" data-index="${index}" value="${escapeHtml(line.markerLabel || '')}" placeholder="輸入標記名稱 (例: 開場白 / 核心亮點)...">
-        </div>
-      ` : ''}
-
-      ${index === currentLineIndex && eff.rescuePhrases.length > 0 ? `
-        <div class="line-card-rescue-bar">
-          <span class="lcr-label">🆘 卡詞救援：</span>
-          <div class="lcr-list">
-            ${eff.rescuePhrases.map((phrase, idx) => `
-              <button class="lcr-btn" data-action="speak-rescue" data-index="${idx}" title="緊急朗讀救援句">
-                🆘 ${escapeHtml(phrase)}
-              </button>
-            `).join('')}
+        ${line.isMarker ? `
+          <div class="line-marker-tag">
+            <span class="marker-flag">🚩 標記名稱:</span>
+            <input class="line-marker-label" data-action="edit-marker-label" data-index="${index}" value="${escapeHtml(line.markerLabel || '')}" placeholder="輸入標記名稱 (例: 開場白 / 核心亮點)...">
           </div>
-        </div>
-      ` : ''}
+        ` : ''}
+
+        ${index === currentLineIndex && eff.rescuePhrases.length > 0 ? `
+          <div class="line-card-rescue-bar">
+            <span class="lcr-label">🆘 卡詞救援：</span>
+            <div class="lcr-list">
+              ${eff.rescuePhrases.map((phrase, idx) => `
+                <button class="lcr-btn" data-action="speak-rescue" data-index="${idx}" title="緊急朗讀救援句">
+                  🆘 ${escapeHtml(phrase)}
+                </button>
+              `).join('')}
+            </div>
+          </div>
+        ` : ''}
+      </div>
     </li>`).join('') ?? ''
 
   return `
