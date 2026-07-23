@@ -1,15 +1,15 @@
 import './styles.css'
 import { registerSW } from 'virtual:pwa-register'
-import { calculateBackupDiff, createScriptSnapshot, loadState, makeId, recordScriptHistory, saveState, validateImportedState } from './storage'
+import { calculateBackupDiff, createScriptSnapshot, getEffectiveScriptSettings, loadState, makeId, recordScriptHistory, resetScriptSettings, saveState, setScriptSetting, validateImportedState } from './storage'
 import { Speaker, type SpeechStatus } from './speech'
-import type { AppState, BackupDiffSummary, CueLine, Script, ScriptRevision } from './types'
+import type { AppState, BackupDiffSummary, CueLine, Script, ScriptRevision, VoicePreset } from './types'
 
 registerSW({ immediate: true })
 
 let state = loadState()
 let currentLineIndex = 0
 let mode: 'rehearsal' | 'stage' = 'rehearsal'
-let isLocked = state.settings.stageLockOnEntry
+let isLocked = getEffectiveScriptSettings(state.scripts.find((s) => s.id === state.selectedScriptId), state.settings).stageLockOnEntry
 let playbackStatus: SpeechStatus = 'stopped'
 let isContinuousPlaying = false
 
@@ -30,8 +30,9 @@ speaker.onStatusChange = (status, message) => {
 }
 
 speaker.onEnd = () => {
-  if (isContinuousPlaying || state.settings.autoAdvance) {
-    const script = selectedScript()
+  const script = selectedScript()
+  const eff = getEffectiveScriptSettings(script, state.settings)
+  if (isContinuousPlaying || eff.autoAdvance) {
     if (script && currentLineIndex < script.lines.length - 1) {
       currentLineIndex++
       render()
@@ -39,8 +40,8 @@ speaker.onEnd = () => {
       const line = selectedLine()
       if (line) {
         window.setTimeout(() => {
-          if (playbackStatus === 'stopped' || isContinuousPlaying || state.settings.autoAdvance) {
-            speaker.speak(line.text, state.settings.voiceURI, state.settings.rate, state.settings.pitch)
+          if (playbackStatus === 'stopped' || isContinuousPlaying || eff.autoAdvance) {
+            speaker.speak(line.text, eff.voiceURI, eff.rate, eff.pitch)
           }
         }, 250)
       }
@@ -72,47 +73,6 @@ function touchScript(id: string | null): void {
     script.updatedAt = new Date().toISOString()
     persist()
   }
-}
-
-function getScriptVoice(script?: Script): string {
-  return script?.voiceURI ?? state.settings.voiceURI ?? ''
-}
-function getScriptRate(script?: Script): number {
-  return script?.rate ?? state.settings.rate ?? 1
-}
-function getScriptPitch(script?: Script): number {
-  return script?.pitch ?? state.settings.pitch ?? 1
-}
-function getScriptFontScale(script?: Script): number {
-  return script?.fontScale ?? state.settings.fontScale ?? 1
-}
-function getScriptAutoAdvance(script?: Script): boolean {
-  return script?.autoAdvance ?? state.settings.autoAdvance ?? false
-}
-function getScriptLockOnEntry(script?: Script): boolean {
-  return script?.stageLockOnEntry ?? state.settings.stageLockOnEntry ?? false
-}
-
-function hasCustomSettings(script?: Script): boolean {
-  if (!script) return false
-  return script.voiceURI !== undefined || script.rate !== undefined || script.pitch !== undefined || script.fontScale !== undefined || script.autoAdvance !== undefined || script.stageLockOnEntry !== undefined
-}
-
-function renderVoiceSelectOptions(selectedUri: string): string {
-  const favorites = state.settings.favoriteVoices ?? []
-  const favoriteList = speaker.voices.filter((v) => favorites.includes(v.voiceURI))
-  const otherList = speaker.voices.filter((v) => !favorites.includes(v.voiceURI))
-
-  let html = `<option value="">系統預設 (Global Default)</option>`
-  if (favoriteList.length > 0) {
-    html += `<optgroup label="⭐ 常用語音列表">`
-    html += favoriteList.map((v) => `<option value="${escapeHtml(v.voiceURI)}" ${v.voiceURI === selectedUri ? 'selected' : ''}>⭐ ${escapeHtml(v.name)} (${v.lang})</option>`).join('')
-    html += `</optgroup>`
-  }
-  html += `<optgroup label="所有語音">`
-  html += otherList.map((v) => `<option value="${escapeHtml(v.voiceURI)}" ${v.voiceURI === selectedUri ? 'selected' : ''}>${escapeHtml(v.name)} (${v.lang})</option>`).join('')
-  html += `</optgroup>`
-  return html
 }
 
 function selectedLine(): CueLine | undefined {
@@ -180,13 +140,8 @@ function rehearsalTemplate(script: Script | undefined, current: CueLine | undefi
       </div>
     </li>`).join('') ?? ''
 
-  const currentVoice = getScriptVoice(script)
-  const currentRate = getScriptRate(script)
-  const currentPitch = getScriptPitch(script)
-  const currentFontScale = getScriptFontScale(script)
-  const currentAutoAdvance = getScriptAutoAdvance(script)
-  const currentLockOnEntry = getScriptLockOnEntry(script)
-  const isFav = (state.settings.favoriteVoices ?? []).includes(currentVoice)
+  const eff = getEffectiveScriptSettings(script, state.settings)
+  const hasCustomSettings = !!(script?.settings && Object.keys(script.settings).length > 0)
 
   return `
     <header class="topbar"><div><h1>Mic Cue</h1><p>文字轉語音提示卡</p></div><div class="top-actions"><button data-action="export">匯出 JSON 備份</button><label class="button-like">匯入 JSON 備份<input id="import-file" type="file" accept="application/json" hidden></label><button class="primary" data-action="enter-stage">進入舞台模式</button></div></header>
@@ -233,21 +188,40 @@ function rehearsalTemplate(script: Script | undefined, current: CueLine | undefi
           </div>
         </section>
         <section>
-          <div class="script-settings-header">
-            <h2>語音與舞台設定</h2>
-            ${hasCustomSettings(script) ? '<span class="custom-badge">獨立腳本設定</span><button class="small-btn" data-action="reset-script-settings" title="重置此腳本設定為全域預設">↺ 重置設定</button>' : '<span class="default-badge">跟隨全域預設</span>'}
+          <div class="settings-header-row">
+            <h2>語音與播放設定</h2>
+            ${hasCustomSettings ? `
+              <span class="custom-badge" title="此腳本已保存獨立專屬的語音、語速、音調與大字設定">⚙️ 腳本專屬設定</span>
+              <button class="reset-settings-btn" data-action="reset-script-settings" title="重置此腳本設為全站通用設定">↩ 重置</button>
+            ` : `
+              <span class="global-badge" title="未個別自訂，使用全站通用預設">🌐 全站預設</span>
+            `}
           </div>
-          <label>語音引擎
-            <div style="display:flex; gap:.4rem; align-items:center;">
-              <select id="voice-select" style="flex:1;">${renderVoiceSelectOptions(currentVoice)}</select>
-              <button data-action="toggle-favorite-voice" class="small-btn" style="flex-shrink:0;" title="將當前選擇語音加入／移除常用列表">${isFav ? '★ 已常用' : '☆ 設常用'}</button>
+          <label>語音<select id="voice-select"><option value="">系統預設</option>${speaker.voices.map((voice) => `<option value="${escapeHtml(voice.voiceURI)}" ${voice.voiceURI === eff.voiceURI ? 'selected' : ''}>${escapeHtml(voice.name)} (${voice.lang})</option>`).join('')}</select></label>
+          <label>語速 <output>${eff.rate.toFixed(1)}×</output><input id="rate" type="range" min="0.5" max="2" step="0.1" value="${eff.rate}"></label>
+          <label>音調 <output>${eff.pitch.toFixed(1)}</output><input id="pitch" type="range" min="0.5" max="2" step="0.1" value="${eff.pitch}"></label>
+          <label>文字大小 <output>${eff.fontScale.toFixed(1)}×</output><input id="font-scale" type="range" min="0.8" max="2.0" step="0.1" value="${eff.fontScale}"></label>
+          <label class="checkbox"><input id="auto-advance" type="checkbox" ${eff.autoAdvance ? 'checked' : ''}> 啟用連續朗讀模式 (單句播放完自動接續下一句)</label>
+          <label class="checkbox"><input id="lock-on-entry" type="checkbox" ${eff.stageLockOnEntry ? 'checked' : ''}> 進入舞台模式時啟用 Stage Lock</label>
+
+          <div class="voice-presets-box">
+            <div class="settings-header-row">
+              <span style="font-weight: 800; font-size: .88rem; color: #4322a3;">⭐ 常用語音預設組合</span>
+              <button data-action="save-voice-preset" title="將當前語音、語速、音調另存為常用預設">💾 另存預設</button>
             </div>
-          </label>
-          <label>語速 <output>${currentRate.toFixed(1)}×</output><input id="rate" type="range" min="0.5" max="2" step="0.1" value="${currentRate}"></label>
-          <label>音調 <output>${currentPitch.toFixed(1)}</output><input id="pitch" type="range" min="0.5" max="2" step="0.1" value="${currentPitch}"></label>
-          <label>文字大小 <output>${currentFontScale.toFixed(1)}×</output><input id="font-scale" type="range" min="0.8" max="2.0" step="0.1" value="${currentFontScale}"></label>
-          <label class="checkbox"><input id="auto-advance" type="checkbox" ${currentAutoAdvance ? 'checked' : ''}> 啟用此腳本連續朗讀模式</label>
-          <label class="checkbox"><input id="lock-on-entry" type="checkbox" ${currentLockOnEntry ? 'checked' : ''}> 進入舞台模式時啟用 Stage Lock</label>
+            ${(state.settings.voicePresets || []).length > 0 ? `
+              <ul class="voice-preset-list">
+                ${state.settings.voicePresets!.map((vp, idx) => `
+                  <li>
+                    <button class="vp-apply-btn" data-action="apply-voice-preset" data-index="${idx}" title="套用「${escapeHtml(vp.name)}」(語速 ${vp.rate}x, 音調 ${vp.pitch})">
+                      ⭐ ${escapeHtml(vp.name)} (${vp.rate}x)
+                    </button>
+                    <button class="vp-del-btn" data-action="delete-voice-preset" data-index="${idx}" aria-label="刪除預設">×</button>
+                  </li>
+                `).join('')}
+              </ul>
+            ` : '<div style="font-size: .8rem; color: #655d72;">可將常用語速與聲音組合另存為預設一鍵套用</div>'}
+          </div>
         </section>
         <section><h2>常用救援句</h2><ul class="rescue-list">${state.settings.rescuePhrases.map((phrase, index) => `<li><button data-action="speak-rescue" data-index="${index}">${escapeHtml(phrase)}</button><button data-action="delete-rescue" data-index="${index}" aria-label="刪除救援句">×</button></li>`).join('')}</ul><button data-action="add-rescue">新增救援句</button></section>
         <p class="shortcut-help">快捷鍵：空白鍵播放／重播，Home / End 跳至首尾句，← 上一句，→ 下一句，S 停止，L 鎖定舞台。</p>
@@ -361,8 +335,9 @@ function scriptHistoryModalTemplate(script: Script | undefined): string {
 
 function stageTemplate(script: Script | undefined, current: CueLine | undefined, next: CueLine | undefined): string {
   const total = script?.lines.length ?? 0
-  const fontScale = getScriptFontScale(script)
-  return `<main id="main-content" class="stage-shell" style="--cue-scale:${fontScale}">
+  const eff = getEffectiveScriptSettings(script, state.settings)
+
+  return `<main id="main-content" class="stage-shell" style="--cue-scale:${eff.fontScale}">
     <header class="stage-header">
       <button data-action="exit-stage">離開舞台模式</button>
       <p>${escapeHtml(script?.title ?? 'Mic Cue')}</p>
@@ -508,46 +483,22 @@ function wireEvents(): void {
     activeItem?.scrollIntoView({ block: 'center', behavior: 'smooth' })
   }
 
-  bindSetting('voice-select', (value) => {
-    const script = selectedScript()
-    if (script) script.voiceURI = value
-    state.settings.voiceURI = value
-  })
-  bindSetting('rate', (value) => {
-    const num = Number(value)
-    const script = selectedScript()
-    if (script) script.rate = num
-    state.settings.rate = num
-  })
-  bindSetting('pitch', (value) => {
-    const num = Number(value)
-    const script = selectedScript()
-    if (script) script.pitch = num
-    state.settings.pitch = num
-  })
-  bindSetting('font-scale', (value) => {
-    const num = Number(value)
-    const script = selectedScript()
-    if (script) script.fontScale = num
-    state.settings.fontScale = num
-  })
+  bindSetting('voice-select', (value) => { setScriptSetting(selectedScript(), state.settings, 'voiceURI', value) })
+  bindSetting('rate', (value) => { setScriptSetting(selectedScript(), state.settings, 'rate', Number(value)) })
+  bindSetting('pitch', (value) => { setScriptSetting(selectedScript(), state.settings, 'pitch', Number(value)) })
+  bindSetting('font-scale', (value) => { setScriptSetting(selectedScript(), state.settings, 'fontScale', Number(value)) })
   
   const autoAdvance = app.querySelector<HTMLInputElement>('#auto-advance')
   autoAdvance?.addEventListener('change', () => {
-    const script = selectedScript()
-    if (script) script.autoAdvance = autoAdvance.checked
-    state.settings.autoAdvance = autoAdvance.checked
+    setScriptSetting(selectedScript(), state.settings, 'autoAdvance', autoAdvance.checked)
     persist()
     render()
   })
 
   const lockOnEntry = app.querySelector<HTMLInputElement>('#lock-on-entry')
   lockOnEntry?.addEventListener('change', () => {
-    const script = selectedScript()
-    if (script) script.stageLockOnEntry = lockOnEntry.checked
-    state.settings.stageLockOnEntry = lockOnEntry.checked
+    setScriptSetting(selectedScript(), state.settings, 'stageLockOnEntry', lockOnEntry.checked)
     persist()
-    render()
   })
   
   app.querySelector<HTMLInputElement>('#import-file')?.addEventListener('change', importJson)
@@ -562,13 +513,14 @@ function handleAction(element: HTMLElement): void {
   const action = element.dataset.action
   const script = selectedScript()
   const index = Number(element.dataset.index)
+  const eff = getEffectiveScriptSettings(script, state.settings)
 
   if (action === 'new-script') { const id = makeId(); state.scripts.unshift({ id, title: '未命名腳本', lines: [], updatedAt: new Date().toISOString() }); state.selectedScriptId = id; currentLineIndex = 0; persist(); render(); return }
   if (action === 'select-script') { const id = element.dataset.id ?? null; touchScript(id); state.selectedScriptId = id; currentLineIndex = 0; render(); return }
   if (action === 'delete-script' && script && confirm(`刪除「${script.title}」？`)) { state.scripts = state.scripts.filter((item) => item.id !== script.id); state.selectedScriptId = getSortedScripts()[0]?.id ?? null; currentLineIndex = 0; persist(); render(); return }
   if (action === 'add-line' && script) { recordScriptHistory(script, '新增台詞'); script.lines.push({ id: makeId(), text: '' }); touchScript(script.id); currentLineIndex = script.lines.length - 1; render(); scrollToActiveLine(); return }
   if (action === 'select-line') { currentLineIndex = index; render(); scrollToActiveLine(); return }
-  if (action === 'play-line') { currentLineIndex = index; render(); scrollToActiveLine(); const line = selectedLine(); if (line) speaker.speak(line.text, getScriptVoice(script), getScriptRate(script), getScriptPitch(script)); return }
+  if (action === 'play-line') { currentLineIndex = index; render(); scrollToActiveLine(); const line = selectedLine(); if (line) speaker.speak(line.text, eff.voiceURI, eff.rate, eff.pitch); return }
   if (action === 'jump-first') { currentLineIndex = 0; render(); scrollToActiveLine(); announce('跳至第一句'); return }
   if (action === 'jump-last' && script) { currentLineIndex = Math.max(0, script.lines.length - 1); render(); scrollToActiveLine(); announce('跳至最後一句'); return }
   if (action === 'jump-back-5') { currentLineIndex = Math.max(0, currentLineIndex - 5); render(); scrollToActiveLine(); announce(`後退至第 ${currentLineIndex + 1} 句`); return }
@@ -578,18 +530,61 @@ function handleAction(element: HTMLElement): void {
   if (action === 'stage-jump-to') { currentLineIndex = index; isStageJumpModalOpen = false; render(); announce(`已跳轉至第 ${index + 1} 句`); return }
   if (action === 'delete-line' && script) { recordScriptHistory(script, '刪除台詞'); script.lines.splice(index, 1); currentLineIndex = Math.max(0, Math.min(currentLineIndex, script.lines.length - 1)); touchScript(script.id); render(); return }
   if (action === 'move-line' && script) { recordScriptHistory(script, '調整台詞順序'); const target = index + Number(element.dataset.direction); if (target >= 0 && target < script.lines.length) [script.lines[index], script.lines[target]] = [script.lines[target], script.lines[index]]; currentLineIndex = target; touchScript(script.id); render(); scrollToActiveLine(); return }
-  if (action === 'play' || action === 'replay') { isContinuousPlaying = false; const line = selectedLine(); if (line) speaker.speak(line.text, getScriptVoice(script), getScriptRate(script), getScriptPitch(script)); return }
-  if (action === 'play-continuous') { isContinuousPlaying = true; render(); const line = selectedLine(); if (line) speaker.speak(line.text, getScriptVoice(script), getScriptRate(script), getScriptPitch(script)); return }
+  if (action === 'play' || action === 'replay') { isContinuousPlaying = false; const line = selectedLine(); if (line) speaker.speak(line.text, eff.voiceURI, eff.rate, eff.pitch); return }
+  if (action === 'play-continuous') { isContinuousPlaying = true; render(); const line = selectedLine(); if (line) speaker.speak(line.text, eff.voiceURI, eff.rate, eff.pitch); return }
   if (action === 'stop') { isContinuousPlaying = false; speaker.stop(); render(); return }
   if (action === 'previous') { currentLineIndex = Math.max(0, currentLineIndex - 1); render(); scrollToActiveLine(); announce(`上一句，第 ${currentLineIndex + 1} 句`); return }
   if (action === 'next') { currentLineIndex = Math.min(Math.max(0, (script?.lines.length ?? 1) - 1), currentLineIndex + 1); render(); scrollToActiveLine(); announce(`下一句，第 ${currentLineIndex + 1} 句`); return }
-  if (action === 'enter-stage') { mode = 'stage'; isLocked = getScriptLockOnEntry(script); isContinuousPlaying = false; isStageJumpModalOpen = false; speaker.stop(false); render(); announce('進入舞台模式'); return }
+  if (action === 'enter-stage') { mode = 'stage'; isLocked = eff.stageLockOnEntry; isContinuousPlaying = false; isStageJumpModalOpen = false; speaker.stop(false); render(); announce('進入舞台模式'); return }
   if (action === 'exit-stage') { mode = 'rehearsal'; isStageJumpModalOpen = false; speaker.stop(false); render(); announce('離開舞台模式，回到排練編輯器'); return }
   if (action === 'toggle-lock') { isLocked = !isLocked; announce(isLocked ? '舞台控制已鎖定。' : '舞台控制已解鎖。'); render(); return }
-  if (action === 'speak-rescue') { speaker.speak(state.settings.rescuePhrases[index], getScriptVoice(script), getScriptRate(script), getScriptPitch(script)); return }
+  if (action === 'speak-rescue') { speaker.speak(state.settings.rescuePhrases[index], eff.voiceURI, eff.rate, eff.pitch); return }
   if (action === 'add-rescue') { const phrase = prompt('新增救援句'); if (phrase?.trim()) { state.settings.rescuePhrases.push(phrase.trim()); persist(); render() }; return }
   if (action === 'delete-rescue') { state.settings.rescuePhrases.splice(index, 1); persist(); render(); return }
   if (action === 'export') exportJson()
+  
+  if (action === 'reset-script-settings' && script) {
+    resetScriptSettings(script)
+    persist()
+    render()
+    announce(`已重置「${script.title}」為全站通用預設設定。`)
+    return
+  }
+  if (action === 'save-voice-preset') {
+    const name = prompt('請輸入此語音組合名稱 (例: 故事廣播員 1.2x):', '常用語音組合')
+    if (name?.trim()) {
+      if (!state.settings.voicePresets) state.settings.voicePresets = []
+      state.settings.voicePresets.push({
+        id: makeId(),
+        name: name.trim(),
+        voiceURI: eff.voiceURI,
+        rate: eff.rate,
+        pitch: eff.pitch
+      })
+      persist()
+      render()
+      announce(`已成功儲存常用語音預設「${name.trim()}」！`)
+    }
+    return
+  }
+  if (action === 'apply-voice-preset' && state.settings.voicePresets?.[index]) {
+    const vp = state.settings.voicePresets[index]
+    setScriptSetting(script, state.settings, 'voiceURI', vp.voiceURI)
+    setScriptSetting(script, state.settings, 'rate', vp.rate)
+    setScriptSetting(script, state.settings, 'pitch', vp.pitch)
+    persist()
+    render()
+    announce(`已套用「${vp.name}」語音組合！`)
+    return
+  }
+  if (action === 'delete-voice-preset' && state.settings.voicePresets?.[index]) {
+    const name = state.settings.voicePresets[index].name
+    state.settings.voicePresets.splice(index, 1)
+    persist()
+    render()
+    announce(`已刪除語音組合「${name}」。`)
+    return
+  }
   
   if (action === 'open-script-history') { isScriptHistoryModalOpen = true; render(); return }
   if (action === 'close-script-history') { isScriptHistoryModalOpen = false; render(); return }
@@ -604,37 +599,6 @@ function handleAction(element: HTMLElement): void {
     persist()
     render()
     announce(`已成功將腳本回復至「${rev.title}」快照！`)
-    return
-  }
-
-  if (action === 'reset-script-settings' && script) {
-    delete script.voiceURI
-    delete script.rate
-    delete script.pitch
-    delete script.fontScale
-    delete script.autoAdvance
-    delete script.stageLockOnEntry
-    persist()
-    render()
-    announce('已成功重置此腳本至全域設定！')
-    return
-  }
-
-  if (action === 'toggle-favorite-voice') {
-    if (!state.settings.favoriteVoices) state.settings.favoriteVoices = []
-    const voice = getScriptVoice(script)
-    if (!voice) return
-    const favs = state.settings.favoriteVoices
-    const idx = favs.indexOf(voice)
-    if (idx >= 0) {
-      favs.splice(idx, 1)
-      announce('已從常用語音清單中移除。')
-    } else {
-      favs.push(voice)
-      announce('已加入常用語音清單！')
-    }
-    persist()
-    render()
     return
   }
 
@@ -685,7 +649,7 @@ function exportJson(): void {
   link.click()
   document.body.removeChild(link)
   URL.revokeObjectURL(url)
-  announce('JSON 安全備份 (含版本資訊) 已成功匯出。')
+  announce('JSON 安全備份 (含版本與專屬設定) 已成功匯出。')
 }
 
 async function importJson(event: Event): Promise<void> {
@@ -716,7 +680,8 @@ document.addEventListener('keydown', (event) => {
     if (isScriptHistoryModalOpen) { isScriptHistoryModalOpen = false; render(); return }
   }
   if ((event.target as HTMLElement).matches('input, textarea, select')) return
-  if (event.key === ' ' || event.key === 'Enter') { event.preventDefault(); const line = selectedLine(); const script = selectedScript(); if (line && !isLocked) speaker.speak(line.text, getScriptVoice(script), getScriptRate(script), getScriptPitch(script)) }
+  const eff = getEffectiveScriptSettings(selectedScript(), state.settings)
+  if (event.key === ' ' || event.key === 'Enter') { event.preventDefault(); const line = selectedLine(); if (line && !isLocked) speaker.speak(line.text, eff.voiceURI, eff.rate, eff.pitch) }
   if (event.key === 'Home' && !isLocked) { currentLineIndex = 0; render(); scrollToActiveLine() }
   if (event.key === 'End' && !isLocked) { const count = selectedScript()?.lines.length ?? 0; currentLineIndex = Math.max(0, count - 1); render(); scrollToActiveLine() }
   if (event.key === 'PageUp' && !isLocked) { currentLineIndex = Math.max(0, currentLineIndex - 5); render(); scrollToActiveLine() }

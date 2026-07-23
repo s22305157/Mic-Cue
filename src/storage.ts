@@ -1,4 +1,4 @@
-import type { AppState, BackupDiffSummary, CueLine, Script, ScriptRevision, Settings } from './types'
+import type { AppState, BackupDiffSummary, CueLine, Script, ScriptRevision, ScriptSettings, Settings, VoicePreset } from './types'
 
 const KEY = 'mic-cue-pwa-state-v1'
 const CURRENT_VERSION = 1
@@ -18,7 +18,10 @@ export const defaultSettings: Settings = {
   stageLockOnEntry: false,
   autoAdvance: false,
   rescuePhrases: ['請給我一秒鐘。', '我想換個方式表達。', '謝謝大家耐心等我。'],
-  favoriteVoices: []
+  voicePresets: [
+    { id: 'vp-std', name: '標準簡報 (1.0x)', voiceURI: '', rate: 1.0, pitch: 1.0 },
+    { id: 'vp-fast', name: '快速導讀 (1.4x)', voiceURI: '', rate: 1.4, pitch: 1.0 }
+  ]
 }
 
 export function makeId(): string {
@@ -81,6 +84,30 @@ function sanitizeRevision(value: unknown): ScriptRevision | null {
   return { id, timestamp, title, lines, reason }
 }
 
+function sanitizeVoicePreset(value: unknown): VoicePreset | null {
+  if (!value || typeof value !== 'object') return null
+  const candidate = value as Partial<VoicePreset>
+  const id = sanitizeText(candidate.id) ?? makeId()
+  const name = sanitizeText(candidate.name) || '未命名預設'
+  const voiceURI = sanitizeText(candidate.voiceURI) ?? ''
+  const rate = clampNumber(candidate.rate, MIN_RATE, MAX_RATE, 1.0)
+  const pitch = clampNumber(candidate.pitch, MIN_PITCH, MAX_PITCH, 1.0)
+  return { id, name, voiceURI, rate, pitch }
+}
+
+function sanitizeScriptSettings(value: unknown): ScriptSettings | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const candidate = value as Partial<ScriptSettings>
+  const res: ScriptSettings = {}
+  if (isString(candidate.voiceURI)) res.voiceURI = candidate.voiceURI
+  if (typeof candidate.rate === 'number' && Number.isFinite(candidate.rate)) res.rate = clampNumber(candidate.rate, MIN_RATE, MAX_RATE, 1.0)
+  if (typeof candidate.pitch === 'number' && Number.isFinite(candidate.pitch)) res.pitch = clampNumber(candidate.pitch, MIN_PITCH, MAX_PITCH, 1.0)
+  if (typeof candidate.fontScale === 'number' && Number.isFinite(candidate.fontScale)) res.fontScale = clampNumber(candidate.fontScale, MIN_FONT_SCALE, MAX_FONT_SCALE, 1.0)
+  if (isBoolean(candidate.stageLockOnEntry)) res.stageLockOnEntry = candidate.stageLockOnEntry
+  if (isBoolean(candidate.autoAdvance)) res.autoAdvance = candidate.autoAdvance
+  return Object.keys(res).length > 0 ? res : undefined
+}
+
 function sanitizeScript(value: unknown): Script | null {
   if (!value || typeof value !== 'object') return null
   const candidate = value as Partial<Script>
@@ -91,47 +118,55 @@ function sanitizeScript(value: unknown): Script | null {
   const lines = candidate.lines
     .slice(0, 1000) // Cap max lines per script for DoS protection
     .map(sanitizeLine)
-    .filter((line: CueLine | null): line is CueLine => !!line)
+    .filter((line): line is CueLine => !!line)
   if (!lines.length) return null
 
   const history = Array.isArray(candidate.history)
     ? candidate.history
         .slice(0, 10)
         .map(sanitizeRevision)
-        .filter((rev: ScriptRevision | null): rev is ScriptRevision => !!rev)
+        .filter((rev): rev is ScriptRevision => !!rev)
     : []
 
-  const voiceURI = isString(candidate.voiceURI) ? candidate.voiceURI : undefined
-  const rate = typeof candidate.rate === 'number' ? clampNumber(candidate.rate, MIN_RATE, MAX_RATE, 1) : undefined
-  const pitch = typeof candidate.pitch === 'number' ? clampNumber(candidate.pitch, MIN_PITCH, MAX_PITCH, 1) : undefined
-  const fontScale = typeof candidate.fontScale === 'number' ? clampNumber(candidate.fontScale, MIN_FONT_SCALE, MAX_FONT_SCALE, 1) : undefined
-  const stageLockOnEntry = isBoolean(candidate.stageLockOnEntry) ? candidate.stageLockOnEntry : undefined
-  const autoAdvance = isBoolean(candidate.autoAdvance) ? candidate.autoAdvance : undefined
+  const settings = sanitizeScriptSettings(candidate.settings)
 
-  return { id, title, updatedAt, lines, history, voiceURI, rate, pitch, fontScale, stageLockOnEntry, autoAdvance }
+  return { id, title, updatedAt, lines, history, settings }
 }
 
-function sanitizeSettings(value: unknown): Settings {
-  if (!value || typeof value !== 'object') return { ...defaultSettings }
-  const candidate = value as Partial<Settings>
-  const rescuePhrases = Array.isArray(candidate.rescuePhrases)
-    ? candidate.rescuePhrases
-        .slice(0, 100) // Cap max rescue phrases for security
-        .map((phrase) => sanitizeText(phrase))
-        .filter((phrase): phrase is string => phrase !== null && phrase.length > 0)
-    : []
-  const favoriteVoices = Array.isArray(candidate.favoriteVoices)
-    ? candidate.favoriteVoices.map((v) => sanitizeText(v)).filter((v): v is string => v !== null)
-    : []
+export function getEffectiveScriptSettings(script: Script | undefined, globalSettings: Settings): Settings {
+  if (!script || !script.settings) {
+    return { ...globalSettings }
+  }
   return {
-    voiceURI: sanitizeText(candidate.voiceURI) ?? '',
-    rate: clampNumber(candidate.rate, MIN_RATE, MAX_RATE, defaultSettings.rate),
-    pitch: clampNumber(candidate.pitch, MIN_PITCH, MAX_PITCH, defaultSettings.pitch),
-    fontScale: clampNumber(candidate.fontScale, MIN_FONT_SCALE, MAX_FONT_SCALE, defaultSettings.fontScale),
-    stageLockOnEntry: isBoolean(candidate.stageLockOnEntry) ? candidate.stageLockOnEntry : defaultSettings.stageLockOnEntry,
-    autoAdvance: isBoolean(candidate.autoAdvance) ? candidate.autoAdvance : defaultSettings.autoAdvance,
-    rescuePhrases: rescuePhrases.length ? rescuePhrases : [...defaultSettings.rescuePhrases],
-    favoriteVoices
+    ...globalSettings,
+    voiceURI: script.settings.voiceURI ?? globalSettings.voiceURI,
+    rate: script.settings.rate ?? globalSettings.rate,
+    pitch: script.settings.pitch ?? globalSettings.pitch,
+    fontScale: script.settings.fontScale ?? globalSettings.fontScale,
+    stageLockOnEntry: script.settings.stageLockOnEntry ?? globalSettings.stageLockOnEntry,
+    autoAdvance: script.settings.autoAdvance ?? globalSettings.autoAdvance,
+  }
+}
+
+export function setScriptSetting<K extends keyof ScriptSettings>(
+  script: Script | undefined,
+  globalSettings: Settings,
+  key: K,
+  value: ScriptSettings[K]
+): void {
+  if (script) {
+    if (!script.settings) script.settings = {}
+    script.settings[key] = value
+    script.updatedAt = new Date().toISOString()
+  } else {
+    (globalSettings as any)[key] = value
+  }
+}
+
+export function resetScriptSettings(script: Script | undefined): void {
+  if (script) {
+    delete script.settings
+    script.updatedAt = new Date().toISOString()
   }
 }
 
@@ -192,6 +227,34 @@ export function calculateBackupDiff(localState: AppState, backupState: AppState)
   }
 }
 
+function sanitizeSettings(value: unknown): Settings {
+  if (!value || typeof value !== 'object') return { ...defaultSettings }
+  const candidate = value as Partial<Settings>
+  const rescuePhrases = Array.isArray(candidate.rescuePhrases)
+    ? candidate.rescuePhrases
+        .slice(0, 100) // Cap max rescue phrases for security
+        .map((phrase) => sanitizeText(phrase))
+        .filter((phrase): phrase is string => phrase !== null && phrase.length > 0)
+    : []
+  const voicePresets = Array.isArray(candidate.voicePresets)
+    ? candidate.voicePresets
+        .slice(0, 50)
+        .map(sanitizeVoicePreset)
+        .filter((vp): vp is VoicePreset => !!vp)
+    : [...(defaultSettings.voicePresets || [])]
+
+  return {
+    voiceURI: sanitizeText(candidate.voiceURI) ?? '',
+    rate: clampNumber(candidate.rate, MIN_RATE, MAX_RATE, defaultSettings.rate),
+    pitch: clampNumber(candidate.pitch, MIN_PITCH, MAX_PITCH, defaultSettings.pitch),
+    fontScale: clampNumber(candidate.fontScale, MIN_FONT_SCALE, MAX_FONT_SCALE, defaultSettings.fontScale),
+    stageLockOnEntry: isBoolean(candidate.stageLockOnEntry) ? candidate.stageLockOnEntry : defaultSettings.stageLockOnEntry,
+    autoAdvance: isBoolean(candidate.autoAdvance) ? candidate.autoAdvance : defaultSettings.autoAdvance,
+    rescuePhrases: rescuePhrases.length ? rescuePhrases : [...defaultSettings.rescuePhrases],
+    voicePresets: voicePresets.length ? voicePresets : [...(defaultSettings.voicePresets || [])]
+  }
+}
+
 /**
  * Migration helper: backward & forward version compatibility
  */
@@ -243,3 +306,4 @@ export function validateImportedState(rawText: string): AppState | null {
     return null
   }
 }
+

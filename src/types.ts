@@ -1,3 +1,20 @@
+export interface VoicePreset {
+  id: string
+  name: string
+  voiceURI: string
+  rate: number
+  pitch: number
+}
+
+export interface ScriptSettings {
+  voiceURI?: string
+  rate?: number
+  pitch?: number
+  fontScale?: number
+  stageLockOnEntry?: boolean
+  autoAdvance?: boolean
+}
+
 export interface CueLine {
   id: string
   text: string
@@ -17,12 +34,7 @@ export interface Script {
   lines: CueLine[]
   updatedAt: string
   history?: ScriptRevision[]
-  voiceURI?: string
-  rate?: number
-  pitch?: number
-  fontScale?: number
-  stageLockOnEntry?: boolean
-  autoAdvance?: boolean
+  settings?: ScriptSettings
 }
 
 export interface Settings {
@@ -33,7 +45,7 @@ export interface Settings {
   stageLockOnEntry: boolean
   autoAdvance: boolean
   rescuePhrases: string[]
-  favoriteVoices?: string[]
+  voicePresets?: VoicePreset[]
 }
 
 export interface AppState {
