@@ -18,6 +18,8 @@ export interface ScriptSettings {
 export interface CueLine {
   id: string
   text: string
+  isMarker?: boolean
+  markerLabel?: string
 }
 
 export interface ScriptRevision {
@@ -28,6 +30,16 @@ export interface ScriptRevision {
   reason?: string
 }
 
+export interface ScriptSettings {
+  voiceURI?: string
+  rate?: number
+  pitch?: number
+  fontScale?: number
+  stageLockOnEntry?: boolean
+  autoAdvance?: boolean
+  rescuePhrases?: string[]
+}
+
 export interface Script {
   id: string
   title: string
@@ -35,6 +47,7 @@ export interface Script {
   updatedAt: string
   history?: ScriptRevision[]
   settings?: ScriptSettings
+  rescuePhrases?: string[]
 }
 
 export interface Settings {

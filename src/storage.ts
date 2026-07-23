@@ -65,7 +65,9 @@ function sanitizeLine(value: unknown): CueLine | null {
   const id = sanitizeText(candidate.id) ?? makeId()
   const text = sanitizeText(candidate.text)
   if (text === null) return null
-  return { id, text }
+  const isMarker = isBoolean(candidate.isMarker) ? candidate.isMarker : undefined
+  const markerLabel = sanitizeText(candidate.markerLabel) ?? undefined
+  return { id, text, isMarker, markerLabel }
 }
 
 function sanitizeRevision(value: unknown): ScriptRevision | null {
@@ -105,6 +107,10 @@ function sanitizeScriptSettings(value: unknown): ScriptSettings | undefined {
   if (typeof candidate.fontScale === 'number' && Number.isFinite(candidate.fontScale)) res.fontScale = clampNumber(candidate.fontScale, MIN_FONT_SCALE, MAX_FONT_SCALE, 1.0)
   if (isBoolean(candidate.stageLockOnEntry)) res.stageLockOnEntry = candidate.stageLockOnEntry
   if (isBoolean(candidate.autoAdvance)) res.autoAdvance = candidate.autoAdvance
+  if (Array.isArray(candidate.rescuePhrases)) {
+    const rp = candidate.rescuePhrases.map((p) => sanitizeText(p)).filter((p): p is string => p !== null && p.length > 0)
+    if (rp.length > 0) res.rescuePhrases = rp
+  }
   return Object.keys(res).length > 0 ? res : undefined
 }
 
@@ -129,13 +135,19 @@ function sanitizeScript(value: unknown): Script | null {
     : []
 
   const settings = sanitizeScriptSettings(candidate.settings)
+  const rescuePhrases = Array.isArray(candidate.rescuePhrases)
+    ? candidate.rescuePhrases.map((p) => sanitizeText(p)).filter((p): p is string => p !== null && p.length > 0)
+    : undefined
 
-  return { id, title, updatedAt, lines, history, settings }
+  return { id, title, updatedAt, lines, history, settings, rescuePhrases: rescuePhrases?.length ? rescuePhrases : undefined }
 }
 
 export function getEffectiveScriptSettings(script: Script | undefined, globalSettings: Settings): Settings {
+  const customPhrases = script?.rescuePhrases || script?.settings?.rescuePhrases
+  const rescuePhrases = customPhrases && customPhrases.length > 0 ? customPhrases : globalSettings.rescuePhrases
+
   if (!script || !script.settings) {
-    return { ...globalSettings }
+    return { ...globalSettings, rescuePhrases }
   }
   return {
     ...globalSettings,
@@ -145,7 +157,17 @@ export function getEffectiveScriptSettings(script: Script | undefined, globalSet
     fontScale: script.settings.fontScale ?? globalSettings.fontScale,
     stageLockOnEntry: script.settings.stageLockOnEntry ?? globalSettings.stageLockOnEntry,
     autoAdvance: script.settings.autoAdvance ?? globalSettings.autoAdvance,
+    rescuePhrases
   }
+}
+
+export function getScriptMarkers(script: Script | undefined): { index: number; line: CueLine }[] {
+  if (!script) return []
+  const res: { index: number; line: CueLine }[] = []
+  script.lines.forEach((line, index) => {
+    if (line.isMarker) res.push({ index, line })
+  })
+  return res
 }
 
 export function setScriptSetting<K extends keyof ScriptSettings>(

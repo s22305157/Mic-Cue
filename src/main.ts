@@ -1,6 +1,6 @@
 import './styles.css'
 import { registerSW } from 'virtual:pwa-register'
-import { calculateBackupDiff, createScriptSnapshot, getEffectiveScriptSettings, loadState, makeId, recordScriptHistory, resetScriptSettings, saveState, setScriptSetting, validateImportedState } from './storage'
+import { calculateBackupDiff, createScriptSnapshot, getEffectiveScriptSettings, getScriptMarkers, loadState, makeId, recordScriptHistory, resetScriptSettings, saveState, setScriptSetting, validateImportedState } from './storage'
 import { Speaker, type SpeechStatus } from './speech'
 import type { AppState, BackupDiffSummary, CueLine, Script, ScriptRevision, VoicePreset } from './types'
 
@@ -128,20 +128,40 @@ function rehearsalTemplate(script: Script | undefined, current: CueLine | undefi
       <small>${item.lines.length} 句</small>
     </button></li>`).join('')
   
+  const eff = getEffectiveScriptSettings(script, state.settings)
+  const hasCustomSettings = !!(script?.settings && Object.keys(script.settings).length > 0)
+  const markers = getScriptMarkers(script)
+
   const lines = script?.lines.map((line, index) => `
     <li class="line-card ${index === currentLineIndex ? 'active' : ''}" data-line-index="${index}">
       <button class="line-select" data-action="select-line" data-index="${index}" title="選取並跳轉至第 ${index + 1} 句" aria-label="選取第 ${index + 1} 句">${index + 1}</button>
       <button class="line-play-btn" data-action="play-line" data-index="${index}" title="從第 ${index + 1} 句開始播放" aria-label="播放第 ${index + 1} 句">${icon('play')}</button>
+      <button class="line-marker-btn ${line.isMarker ? 'active' : ''}" data-action="toggle-line-marker" data-index="${index}" title="${line.isMarker ? '取消標記點' : '設為標記點 (⭐ 快速跳轉)'}">${line.isMarker ? '🚩' : '🏳️'}</button>
       <textarea data-line-id="${line.id}" aria-label="第 ${index + 1} 句台詞">${escapeHtml(line.text)}</textarea>
       <div class="line-actions">
         <button data-action="move-line" data-index="${index}" data-direction="-1" ${index === 0 ? 'disabled' : ''} aria-label="上移台詞">${icon('up')}</button>
         <button data-action="move-line" data-index="${index}" data-direction="1" ${index === (script.lines.length - 1) ? 'disabled' : ''} aria-label="下移台詞">${icon('down')}</button>
         <button data-action="delete-line" data-index="${index}" aria-label="刪除台詞">${icon('delete')}</button>
       </div>
-    </li>`).join('') ?? ''
 
-  const eff = getEffectiveScriptSettings(script, state.settings)
-  const hasCustomSettings = !!(script?.settings && Object.keys(script.settings).length > 0)
+      ${line.isMarker ? `
+        <div class="line-marker-tag">
+          <span class="marker-flag">🚩 標記點:</span>
+          <input class="line-marker-label" data-action="edit-marker-label" data-index="${index}" value="${escapeHtml(line.markerLabel || '')}" placeholder="標記名稱 (例: 開場白)...">
+        </div>
+      ` : ''}
+
+      ${index === currentLineIndex && eff.rescuePhrases.length > 0 ? `
+        <div class="line-card-rescue-bar">
+          <span class="lcr-label">🆘 若卡詞可點擊：</span>
+          ${eff.rescuePhrases.map((phrase, idx) => `
+            <button class="lcr-btn" data-action="speak-rescue" data-index="${idx}" title="緊急朗讀：${escapeHtml(phrase)}">
+              🆘 ${escapeHtml(phrase)}
+            </button>
+          `).join('')}
+        </div>
+      ` : ''}
+    </li>`).join('') ?? ''
 
   return `
     <header class="topbar"><div><h1>Mic Cue</h1><p>文字轉語音提示卡</p></div><div class="top-actions"><button data-action="export">匯出 JSON 備份</button><label class="button-like">匯入 JSON 備份<input id="import-file" type="file" accept="application/json" hidden></label><button class="primary" data-action="enter-stage">進入舞台模式</button></div></header>
@@ -157,7 +177,7 @@ function rehearsalTemplate(script: Script | undefined, current: CueLine | undefi
               ${script.lines.length > 0 ? `
                 <select class="quick-jump-select" id="quick-jump-select" aria-label="快速跳轉至指定台詞">
                   <option value="">🎯 快速跳至台詞...</option>
-                  ${script.lines.map((line, idx) => `<option value="${idx}" ${idx === currentLineIndex ? 'selected' : ''}>第 ${idx + 1} 句: ${escapeHtml(line.text.slice(0, 18))}${line.text.length > 18 ? '...' : ''}</option>`).join('')}
+                  ${script.lines.map((line, idx) => `<option value="${idx}" ${idx === currentLineIndex ? 'selected' : ''}>第 ${idx + 1} 句: ${line.isMarker ? '🚩 ' : ''}${escapeHtml((line.markerLabel || line.text).slice(0, 18))}</option>`).join('')}
                 </select>
               ` : ''}
               <button data-action="add-line">新增台詞</button>
@@ -170,6 +190,18 @@ function rehearsalTemplate(script: Script | undefined, current: CueLine | undefi
               <button data-action="previous" ${currentLineIndex === 0 ? 'disabled' : ''}>◀ 上一句</button>
               <button data-action="next" ${currentLineIndex >= script.lines.length - 1 ? 'disabled' : ''}>下一句 ▶</button>
               <button data-action="jump-last" ${currentLineIndex >= script.lines.length - 1 ? 'disabled' : ''}>⏭ 最後一句</button>
+            </div>
+          ` : ''}
+          ${markers.length > 0 ? `
+            <div class="marker-jump-bar" role="region" aria-label="標記點快跳區">
+              <span class="marker-bar-title">🚩 標記點快跳 (${markers.length})：</span>
+              <div class="marker-chip-list">
+                ${markers.map((m: { index: number; line: CueLine }) => `
+                  <button class="marker-chip ${m.index === currentLineIndex ? 'active' : ''}" data-action="select-line" data-index="${m.index}">
+                    🚩 第 ${m.index + 1} 句 ${escapeHtml(m.line.markerLabel || m.line.text.slice(0, 10) || '標記')}
+                  </button>
+                `).join('')}
+              </div>
             </div>
           ` : ''}
           <ul class="line-list">${lines || '<li class="empty">尚無台詞，請新增一行。</li>'}</ul>
@@ -223,7 +255,25 @@ function rehearsalTemplate(script: Script | undefined, current: CueLine | undefi
             ` : '<div style="font-size: .8rem; color: #655d72;">可將常用語速與聲音組合另存為預設一鍵套用</div>'}
           </div>
         </section>
-        <section><h2>常用救援句</h2><ul class="rescue-list">${state.settings.rescuePhrases.map((phrase, index) => `<li><button data-action="speak-rescue" data-index="${index}">${escapeHtml(phrase)}</button><button data-action="delete-rescue" data-index="${index}" aria-label="刪除救援句">×</button></li>`).join('')}</ul><button data-action="add-rescue">新增救援句</button></section>
+        <section>
+          <div class="settings-header-row">
+            <h2>常用救援句</h2>
+            ${script ? `
+              <button class="reset-settings-btn" data-action="toggle-script-rescue" title="${(script.rescuePhrases || script.settings?.rescuePhrases) ? '目前為此腳本獨立救援句，點擊恢復全站通用' : '目前為全站通用救援句，點擊轉換為此腳本獨立清單'}">
+                ${(script.rescuePhrases || script.settings?.rescuePhrases) ? '🎯 腳本獨立中' : '🌐 全站預設'}
+              </button>
+            ` : ''}
+          </div>
+          <ul class="rescue-list">
+            ${eff.rescuePhrases.map((phrase, index) => `
+              <li>
+                <button data-action="speak-rescue" data-index="${index}">${escapeHtml(phrase)}</button>
+                <button data-action="delete-rescue" data-index="${index}" aria-label="刪除救援句">×</button>
+              </li>
+            `).join('')}
+          </ul>
+          <button data-action="add-rescue">新增救援句</button>
+        </section>
         <p class="shortcut-help">快捷鍵：空白鍵播放／重播，Home / End 跳至首尾句，← 上一句，→ 下一句，S 停止，L 鎖定舞台。</p>
       </aside>
 
@@ -336,6 +386,7 @@ function scriptHistoryModalTemplate(script: Script | undefined): string {
 function stageTemplate(script: Script | undefined, current: CueLine | undefined, next: CueLine | undefined): string {
   const total = script?.lines.length ?? 0
   const eff = getEffectiveScriptSettings(script, state.settings)
+  const markers = getScriptMarkers(script)
 
   return `<main id="main-content" class="stage-shell" style="--cue-scale:${eff.fontScale}">
     <header class="stage-header">
@@ -348,6 +399,16 @@ function stageTemplate(script: Script | undefined, current: CueLine | undefined,
       <div class="stage-jump-toolbar" role="region" aria-label="舞台快速跳轉工具列">
         <button data-action="jump-first" ${isLocked || currentLineIndex === 0 ? 'disabled' : ''} aria-label="跳至全劇第一句">⏮ 首句</button>
         <button data-action="jump-back-5" ${isLocked || currentLineIndex === 0 ? 'disabled' : ''} aria-label="倒退5句">◀ -5 句</button>
+
+        ${markers.length > 0 ? `
+          <select class="stage-marker-select" id="stage-marker-select" ${isLocked ? 'disabled' : ''} aria-label="跳至標記點">
+            <option value="">🚩 標記點 (${markers.length})...</option>
+            ${markers.map((m: { index: number; line: CueLine }) => `
+              <option value="${m.index}" ${m.index === currentLineIndex ? 'selected' : ''}>🚩 第 ${m.index + 1} 句: ${escapeHtml(m.line.markerLabel || m.line.text.slice(0, 12))}</option>
+            `).join('')}
+          </select>
+        ` : ''}
+
         <button class="stage-jump-trigger" data-action="open-stage-jump" ${isLocked ? 'disabled' : ''} aria-label="開啟句子跳轉盤，目前第 ${currentLineIndex + 1} 句，共 ${total} 句">🎯 跳轉句子 (${currentLineIndex + 1} / ${total})</button>
         <button data-action="jump-forward-5" ${isLocked || currentLineIndex >= total - 1 ? 'disabled' : ''} aria-label="前進5句">+5 句 ▶</button>
         <button data-action="jump-last" ${isLocked || currentLineIndex >= total - 1 ? 'disabled' : ''} aria-label="跳至全劇最後一句">⏭ 尾句</button>
@@ -355,8 +416,22 @@ function stageTemplate(script: Script | undefined, current: CueLine | undefined,
     ` : ''}
 
     <section class="cue-current" aria-label="目前台詞 (大字提示卡)">
-      <span>目前句子 ${currentLineIndex + 1} / ${total}</span>
+      <span>目前句子 ${currentLineIndex + 1} / ${total} ${current?.isMarker ? `<strong style="color:#f9c74f; margin-left:.6rem;">🚩 ${escapeHtml(current.markerLabel || '標記點')}</strong>` : ''}</span>
       <p>${escapeHtml(current?.text || '沒有可播放的台詞')}</p>
+
+      ${eff.rescuePhrases.length > 0 ? `
+        <div class="inline-cue-rescue" aria-label="卡詞即時救援區">
+          <span class="inline-rescue-label">🆘 若卡詞點擊即刻朗讀救援：</span>
+          <div class="inline-rescue-btns">
+            ${eff.rescuePhrases.map((phrase, idx) => `
+              <button class="inline-rescue-btn" data-action="speak-rescue" data-index="${idx}" aria-label="緊急播放救援句：${escapeHtml(phrase)}">
+                <span class="rescue-icon" aria-hidden="true">🆘</span>
+                <span class="rescue-text">${escapeHtml(phrase)}</span>
+              </button>
+            `).join('')}
+          </div>
+        </div>
+      ` : ''}
     </section>
     <section class="cue-next" aria-label="下一句台詞預覽"><span>下一句</span><p>${escapeHtml(next?.text || '已是最後一句')}</p></section>
     <div class="stage-status" role="status" aria-live="polite">${playbackStatus === 'playing' ? '正在播放目前句子' : '已停止播放'}</div>
@@ -369,13 +444,13 @@ function stageTemplate(script: Script | undefined, current: CueLine | undefined,
     </section>
     ${isLocked ? '<p class="lock-note" role="note">舞台控制已鎖定。按右上角「已鎖定」進行解鎖；停止鍵與救援句隨時可用。</p>' : ''}
 
-    ${state.settings.rescuePhrases.length > 0 ? `
+    ${eff.rescuePhrases.length > 0 ? `
       <section class="stage-rescue" aria-label="舞台常用救援句">
         <div class="stage-rescue-header">
           <span>🆘 常用救援句</span>
         </div>
         <div class="stage-rescue-list">
-          ${state.settings.rescuePhrases.map((phrase, idx) => `
+          ${eff.rescuePhrases.map((phrase, idx) => `
             <button class="stage-rescue-btn" data-action="speak-rescue" data-index="${idx}" aria-label="緊急播放救援句：${escapeHtml(phrase)}">
               <span class="rescue-icon" aria-hidden="true">🆘</span>
               <span class="rescue-text">${escapeHtml(phrase)}</span>
@@ -393,7 +468,7 @@ function stageJumpModalTemplate(script: Script | undefined): string {
   if (!script) return ''
   const gridItems = script.lines.map((line, idx) => `
     <button class="stage-jump-grid-item ${idx === currentLineIndex ? 'active' : ''}" data-action="stage-jump-to" data-index="${idx}" aria-label="跳至第 ${idx + 1} 句：${escapeHtml(line.text)}">
-      <span class="jump-item-num" aria-hidden="true">第 ${idx + 1} 句</span>
+      <span class="jump-item-num" aria-hidden="true">${line.isMarker ? '🚩 ' : ''}第 ${idx + 1} 句 ${line.markerLabel ? `(${escapeHtml(line.markerLabel)})` : ''}</span>
       <span class="jump-item-text">${escapeHtml(line.text)}</span>
     </button>
   `).join('')
@@ -407,7 +482,7 @@ function stageJumpModalTemplate(script: Script | undefined): string {
         </header>
         <div class="stage-jump-search-row">
           <label for="stage-jump-filter" class="sr-only">搜尋台詞關鍵字</label>
-          <input type="text" id="stage-jump-filter" placeholder="🔍 輸入關鍵字過濾台詞..." autocomplete="off">
+          <input type="text" id="stage-jump-filter" placeholder="🔍 輸入關鍵字或 🚩 搜尋標記..." autocomplete="off">
         </div>
         <div class="stage-jump-grid" id="stage-jump-grid">
           ${gridItems}
@@ -429,6 +504,16 @@ function wireEvents(): void {
       persist()
     }
   }))
+  app.querySelectorAll<HTMLInputElement>('.line-marker-label').forEach((input) => input.addEventListener('change', () => {
+    const script = selectedScript()
+    const idx = Number(input.dataset.index)
+    if (script?.lines[idx]) {
+      script.lines[idx].markerLabel = input.value.trim()
+      script.updatedAt = new Date().toISOString()
+      persist()
+      render()
+    }
+  }))
   const title = app.querySelector<HTMLInputElement>('#script-title')
   title?.addEventListener('change', () => {
     const script = selectedScript()
@@ -447,6 +532,15 @@ function wireEvents(): void {
       currentLineIndex = Number(quickJumpSelect.value)
       render()
       scrollToActiveLine()
+    }
+  })
+
+  const stageMarkerSelect = app.querySelector<HTMLSelectElement>('#stage-marker-select')
+  stageMarkerSelect?.addEventListener('change', () => {
+    if (stageMarkerSelect.value !== '') {
+      currentLineIndex = Number(stageMarkerSelect.value)
+      render()
+      announce(`已跳轉至標記點第 ${currentLineIndex + 1} 句`)
     }
   })
 
@@ -520,6 +614,14 @@ function handleAction(element: HTMLElement): void {
   if (action === 'delete-script' && script && confirm(`刪除「${script.title}」？`)) { state.scripts = state.scripts.filter((item) => item.id !== script.id); state.selectedScriptId = getSortedScripts()[0]?.id ?? null; currentLineIndex = 0; persist(); render(); return }
   if (action === 'add-line' && script) { recordScriptHistory(script, '新增台詞'); script.lines.push({ id: makeId(), text: '' }); touchScript(script.id); currentLineIndex = script.lines.length - 1; render(); scrollToActiveLine(); return }
   if (action === 'select-line') { currentLineIndex = index; render(); scrollToActiveLine(); return }
+  if (action === 'toggle-line-marker' && script?.lines[index]) {
+    script.lines[index].isMarker = !script.lines[index].isMarker
+    recordScriptHistory(script, script.lines[index].isMarker ? '標記台詞' : '取消台詞標記')
+    persist()
+    render()
+    announce(script.lines[index].isMarker ? `第 ${index + 1} 句已設為標記點` : `已取消第 ${index + 1} 句標記`)
+    return
+  }
   if (action === 'play-line') { currentLineIndex = index; render(); scrollToActiveLine(); const line = selectedLine(); if (line) speaker.speak(line.text, eff.voiceURI, eff.rate, eff.pitch); return }
   if (action === 'jump-first') { currentLineIndex = 0; render(); scrollToActiveLine(); announce('跳至第一句'); return }
   if (action === 'jump-last' && script) { currentLineIndex = Math.max(0, script.lines.length - 1); render(); scrollToActiveLine(); announce('跳至最後一句'); return }
@@ -538,9 +640,45 @@ function handleAction(element: HTMLElement): void {
   if (action === 'enter-stage') { mode = 'stage'; isLocked = eff.stageLockOnEntry; isContinuousPlaying = false; isStageJumpModalOpen = false; speaker.stop(false); render(); announce('進入舞台模式'); return }
   if (action === 'exit-stage') { mode = 'rehearsal'; isStageJumpModalOpen = false; speaker.stop(false); render(); announce('離開舞台模式，回到排練編輯器'); return }
   if (action === 'toggle-lock') { isLocked = !isLocked; announce(isLocked ? '舞台控制已鎖定。' : '舞台控制已解鎖。'); render(); return }
-  if (action === 'speak-rescue') { speaker.speak(state.settings.rescuePhrases[index], eff.voiceURI, eff.rate, eff.pitch); return }
-  if (action === 'add-rescue') { const phrase = prompt('新增救援句'); if (phrase?.trim()) { state.settings.rescuePhrases.push(phrase.trim()); persist(); render() }; return }
-  if (action === 'delete-rescue') { state.settings.rescuePhrases.splice(index, 1); persist(); render(); return }
+  if (action === 'speak-rescue') { speaker.speak(eff.rescuePhrases[index] || state.settings.rescuePhrases[index], eff.voiceURI, eff.rate, eff.pitch); return }
+  if (action === 'toggle-script-rescue' && script) {
+    if (script.rescuePhrases || script.settings?.rescuePhrases) {
+      delete script.rescuePhrases
+      if (script.settings) delete script.settings.rescuePhrases
+      announce('已恢復使用全站通用救援句。')
+    } else {
+      script.rescuePhrases = [...state.settings.rescuePhrases]
+      announce('已轉換為此腳本獨立救援句！')
+    }
+    persist()
+    render()
+    return
+  }
+  if (action === 'add-rescue') {
+    const phrase = prompt('新增救援句')
+    if (phrase?.trim()) {
+      if (script && (script.rescuePhrases || script.settings?.rescuePhrases)) {
+        if (!script.rescuePhrases) script.rescuePhrases = [...(script.settings?.rescuePhrases || state.settings.rescuePhrases)]
+        script.rescuePhrases.push(phrase.trim())
+      } else {
+        state.settings.rescuePhrases.push(phrase.trim())
+      }
+      persist()
+      render()
+    }
+    return
+  }
+  if (action === 'delete-rescue') {
+    if (script && (script.rescuePhrases || script.settings?.rescuePhrases)) {
+      if (!script.rescuePhrases) script.rescuePhrases = [...(script.settings?.rescuePhrases || state.settings.rescuePhrases)]
+      script.rescuePhrases.splice(index, 1)
+    } else {
+      state.settings.rescuePhrases.splice(index, 1)
+    }
+    persist()
+    render()
+    return
+  }
   if (action === 'export') exportJson()
   
   if (action === 'reset-script-settings' && script) {
