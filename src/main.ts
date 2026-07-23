@@ -428,20 +428,6 @@ function stageTemplate(script: Script | undefined, current: CueLine | undefined,
     <section class="cue-current" aria-label="目前台詞 (大字提示卡)">
       <span>目前句子 ${currentLineIndex + 1} / ${total} ${current?.isMarker ? `<strong style="color:#f9c74f; margin-left:.6rem;">🚩 ${escapeHtml(current.markerLabel || '標記點')}</strong>` : ''}</span>
       <p>${escapeHtml(current?.text || '沒有可播放的台詞')}</p>
-
-      ${eff.rescuePhrases.length > 0 ? `
-        <div class="inline-cue-rescue" aria-label="卡詞即時救援區">
-          <span class="inline-rescue-label">🆘 若卡詞點擊即刻朗讀救援：</span>
-          <div class="inline-rescue-btns">
-            ${eff.rescuePhrases.map((phrase, idx) => `
-              <button class="inline-rescue-btn" data-action="speak-rescue" data-index="${idx}" aria-label="緊急播放救援句：${escapeHtml(phrase)}">
-                <span class="rescue-icon" aria-hidden="true">🆘</span>
-                <span class="rescue-text">${escapeHtml(phrase)}</span>
-              </button>
-            `).join('')}
-          </div>
-        </div>
-      ` : ''}
     </section>
     <section class="cue-next" aria-label="下一句台詞預覽"><span>下一句</span><p>${escapeHtml(next?.text || '已是最後一句')}</p></section>
     <div class="stage-status" role="status" aria-live="polite">${playbackStatus === 'playing' ? '正在播放目前句子' : '已停止播放'}</div>
