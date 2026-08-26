@@ -1,5 +1,26 @@
 export type SpeechStatus = 'stopped' | 'playing'
 
+/** A virtual voice that resolves to a free Chinese male voice installed on the device. */
+export const PREFERRED_CHINESE_MALE_VOICE = 'mic-cue://voice/chinese-male'
+
+// Web Speech does not expose voice gender. These are the public male voice names
+// used by the major OS/browser vendors, so matching must be name based.
+const CHINESE_MALE_VOICE_NAMES = [
+  'zhiwei', 'zhi wei', 'kangkang', 'kang kang', 'danny',
+  'yunjhe', 'yun jhe', 'yunxi', 'yun xi', 'yunjian', 'yun jian',
+  'yunyang', 'yun yang', 'yunfeng', 'yun feng', 'yunhao', 'yun hao',
+  'yunjie', 'yun jie', 'yunxia', 'yun xia', 'yunxiao', 'yun xiao',
+  'yunye', 'yun ye', 'yunze', 'yun ze', 'wanlung', 'wan lung',
+  'yunsong', 'yun song', 'yunqi', 'yun qi', 'yundeng', 'yun deng',
+  'yunbiao', 'yun biao', 'yunxiang', 'yun xiang', '雲哲', '云哲',
+  '雲希', '云希', '雲健', '云健', '雲揚', '云扬', '雲龍', '云龙',
+  '志偉', '志伟', '康康'
+]
+
+function normalizedVoiceLabel(voice: SpeechSynthesisVoice): string {
+  return `${voice.name} ${voice.voiceURI}`.toLocaleLowerCase()
+}
+
 export class Speaker {
   private activeUtterances: Set<SpeechSynthesisUtterance> = new Set()
   private currentUtterance: SpeechSynthesisUtterance | null = null
@@ -11,6 +32,22 @@ export class Speaker {
 
   get voices(): SpeechSynthesisVoice[] {
     return typeof speechSynthesis !== 'undefined' ? speechSynthesis.getVoices() : []
+  }
+
+  get preferredChineseMaleVoice(): SpeechSynthesisVoice | null {
+    const candidates = this.voices.filter((voice) => voice.lang.toLocaleLowerCase().startsWith('zh'))
+    const matches = candidates.filter((voice) => {
+      const label = normalizedVoiceLabel(voice)
+      return CHINESE_MALE_VOICE_NAMES.some((name) => label.includes(name))
+    })
+
+    // Prefer Taiwanese Mandarin, then Cantonese, then other Mandarin variants.
+    const localePriority = ['zh-tw', 'zh-hk', 'zh-cn']
+    return matches.sort((a, b) => {
+      const aRank = localePriority.indexOf(a.lang.toLocaleLowerCase())
+      const bRank = localePriority.indexOf(b.lang.toLocaleLowerCase())
+      return (aRank < 0 ? localePriority.length : aRank) - (bRank < 0 ? localePriority.length : bRank)
+    })[0] ?? null
   }
 
   speak(text: string, voiceURI: string, rate: number, pitch: number, onEndCallback?: () => void): void {
@@ -36,7 +73,15 @@ export class Speaker {
       const utterance = new SpeechSynthesisUtterance(trimmed)
       utterance.rate = rate
       utterance.pitch = pitch
-      if (voiceURI) {
+      if (voiceURI === PREFERRED_CHINESE_MALE_VOICE) {
+        const maleVoice = this.preferredChineseMaleVoice
+        if (!maleVoice) {
+          this.onStatusChange('stopped', '目前裝置未提供中文男聲。請先在手機安裝中文男聲，再重新開啟網頁。')
+          return
+        }
+        utterance.voice = maleVoice
+        utterance.lang = maleVoice.lang
+      } else if (voiceURI) {
         utterance.voice = this.voices.find((voice) => voice.voiceURI === voiceURI) ?? null
       }
 
@@ -79,7 +124,10 @@ export class Speaker {
         }
         speechSynthesis.speak(utterance)
         this.startKeepAlive()
-        this.onStatusChange('playing', `正在播放：${trimmed}`)
+        const voiceMessage = voiceURI === PREFERRED_CHINESE_MALE_VOICE && utterance.voice
+          ? `（男聲：${utterance.voice.name}）`
+          : ''
+        this.onStatusChange('playing', `正在播放${voiceMessage}：${trimmed}`)
       } catch {
         if (cleanup()) {
           this.recover('語音播放啟動失敗。')

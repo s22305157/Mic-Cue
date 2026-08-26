@@ -717,6 +717,13 @@ input, select, textarea {
   background: #fca5a5;
 }
 
+.setting-hint {
+  margin: -0.35rem 0 0.2rem;
+  color: #64748b;
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
 .voice-presets-box {
   display: flex;
   flex-direction: column;
