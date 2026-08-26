@@ -31,6 +31,8 @@ export class Speaker {
   private keepAliveTimer: number | null = null
   private speakTimeoutId: number | null = null
   private currentAudio: HTMLAudioElement | null = null
+  private onlineAudioCache = new Map<string, string>()
+  private onlineAudioRequests = new Map<string, Promise<string>>()
   private lastText = ''
   public onStatusChange: (status: SpeechStatus, message: string) => void = () => undefined
   public onEnd: () => void = () => undefined
@@ -53,6 +55,14 @@ export class Speaker {
       const bRank = localePriority.indexOf(b.lang.toLocaleLowerCase())
       return (aRank < 0 ? localePriority.length : aRank) - (bRank < 0 ? localePriority.length : bRank)
     })[0] ?? null
+  }
+
+  async preloadOnlineMale(text: string, rate: number, pitch: number): Promise<void> {
+    const trimmed = text.trim()
+    if (!trimmed) return
+    const key = this.onlineAudioKey(trimmed, rate, pitch)
+    if (this.onlineAudioCache.has(key)) return
+    await this.fetchOnlineMaleAudio(trimmed, rate, pitch)
   }
 
   speak(text: string, voiceURI: string, rate: number, pitch: number, onEndCallback?: () => void): void {
@@ -196,24 +206,14 @@ export class Speaker {
   }
 
   private speakOnlineMale(text: string, rate: number, pitch: number, onEndCallback?: () => void): void {
-    const ratePercent = Math.round(Math.min(50, Math.max(-50, (rate - 1) * 100)))
-    const pitchHz = Math.round(Math.min(50, Math.max(-50, (pitch - 1) * 50)))
-    const signed = (value: number, suffix: string) => `${value >= 0 ? '+' : ''}${value}${suffix}`
-    const params = new URLSearchParams({
-      text,
-      voice: ONLINE_TTS_VOICE,
-      rate: signed(ratePercent, '%'),
-      volume: '+0%',
-      pitch: signed(pitchHz, 'Hz'),
-      format: 'mp3'
-    })
-
-    const audio = new Audio(`${ONLINE_TTS_ENDPOINT}?${params}`)
+    const key = this.onlineAudioKey(text, rate, pitch)
+    const cachedAudioUrl = this.onlineAudioCache.get(key)
+    const audio = new Audio(cachedAudioUrl ?? this.onlineMaleUrl(text, rate, pitch))
     this.currentAudio = audio
     audio.preload = 'auto'
     audio.onplaying = () => {
       if (this.currentAudio === audio) {
-        this.onStatusChange('playing', `正在播放（線上男聲：雲哲）：${text}`)
+        this.onStatusChange('playing', `正在播放（線上男聲：雲哲${cachedAudioUrl ? '，已預載' : ''}）：${text}`)
       }
     }
     audio.onended = () => {
@@ -229,12 +229,59 @@ export class Speaker {
       this.recover('線上男聲暫時無法播放，請檢查網路或改用裝置語音。')
     }
 
-    this.onStatusChange('playing', '正在連線取得台灣 AI 男聲「雲哲」…')
+    this.onStatusChange('playing', cachedAudioUrl ? '正在播放已預載的台灣 AI 男聲「雲哲」…' : '正在連線取得台灣 AI 男聲「雲哲」…')
     void audio.play().catch(() => {
       if (this.currentAudio !== audio) return
       this.currentAudio = null
       this.recover('瀏覽器阻擋了線上男聲播放，請再點一次播放。')
     })
+  }
+
+  private onlineAudioKey(text: string, rate: number, pitch: number): string {
+    return `${rate.toFixed(2)}|${pitch.toFixed(2)}|${text}`
+  }
+
+  private onlineMaleUrl(text: string, rate: number, pitch: number): string {
+    const ratePercent = Math.round(Math.min(50, Math.max(-50, (rate - 1) * 100)))
+    const pitchHz = Math.round(Math.min(50, Math.max(-50, (pitch - 1) * 50)))
+    const signed = (value: number, suffix: string) => `${value >= 0 ? '+' : ''}${value}${suffix}`
+    const params = new URLSearchParams({
+      text,
+      voice: ONLINE_TTS_VOICE,
+      rate: signed(ratePercent, '%'),
+      volume: '+0%',
+      pitch: signed(pitchHz, 'Hz'),
+      format: 'mp3'
+    })
+    return `${ONLINE_TTS_ENDPOINT}?${params}`
+  }
+
+  private fetchOnlineMaleAudio(text: string, rate: number, pitch: number): Promise<string> {
+    const key = this.onlineAudioKey(text, rate, pitch)
+    const existing = this.onlineAudioRequests.get(key)
+    if (existing) return existing
+
+    const request = fetch(this.onlineMaleUrl(text, rate, pitch))
+      .then((response) => {
+        if (!response.ok) throw new Error(`TTS preload failed: ${response.status}`)
+        return response.blob()
+      })
+      .then((blob) => {
+        if (!blob.type.startsWith('audio/')) throw new Error('TTS preload returned a non-audio response')
+        const audioUrl = URL.createObjectURL(blob)
+        this.onlineAudioCache.set(key, audioUrl)
+        while (this.onlineAudioCache.size > 8) {
+          const oldest = this.onlineAudioCache.entries().next().value as [string, string] | undefined
+          if (!oldest) break
+          this.onlineAudioCache.delete(oldest[0])
+          URL.revokeObjectURL(oldest[1])
+        }
+        return audioUrl
+      })
+      .finally(() => this.onlineAudioRequests.delete(key))
+
+    this.onlineAudioRequests.set(key, request)
+    return request
   }
 }
 

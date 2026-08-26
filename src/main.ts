@@ -18,6 +18,7 @@ let isImportPreviewModalOpen = false
 let pendingImportState: AppState | null = null
 let pendingImportDiff: BackupDiffSummary | null = null
 let isScriptHistoryModalOpen = false
+let onlineVoicePreloadTimer: number | null = null
 
 const speaker = new Speaker()
 const app = document.querySelector<HTMLDivElement>('#app')!
@@ -115,6 +116,23 @@ function render(): void {
   app.className = `app ${mode === 'stage' ? 'stage-mode' : ''}`
   app.innerHTML = mode === 'stage' ? stageTemplate(active, current, next) : rehearsalTemplate(active, current)
   wireEvents()
+  scheduleOnlineVoicePreload()
+}
+
+function scheduleOnlineVoicePreload(delay = 350): void {
+  if (onlineVoicePreloadTimer !== null) {
+    window.clearTimeout(onlineVoicePreloadTimer)
+    onlineVoicePreloadTimer = null
+  }
+  const script = selectedScript()
+  const eff = getEffectiveScriptSettings(script, state.settings)
+  if (eff.voiceURI !== PREFERRED_CHINESE_MALE_VOICE || !script) return
+
+  const lines = script.lines.slice(currentLineIndex, currentLineIndex + 2).map((line) => line.text).filter(Boolean)
+  onlineVoicePreloadTimer = window.setTimeout(() => {
+    onlineVoicePreloadTimer = null
+    lines.forEach((text) => void speaker.preloadOnlineMale(text, eff.rate, eff.pitch).catch(() => undefined))
+  }, delay)
 }
 
 function rehearsalTemplate(script: Script | undefined, current: CueLine | undefined): string {
@@ -240,7 +258,7 @@ function rehearsalTemplate(script: Script | undefined, current: CueLine | undefi
             `}
           </div>
           <label>語音<select id="voice-select"><option value="">系統預設</option><option value="${PREFERRED_CHINESE_MALE_VOICE}" ${eff.voiceURI === PREFERRED_CHINESE_MALE_VOICE ? 'selected' : ''}>☁️ 台灣 AI 男聲 — 雲哲（需網路）</option><option value="${PREFERRED_LOCAL_CHINESE_MALE_VOICE}" ${eff.voiceURI === PREFERRED_LOCAL_CHINESE_MALE_VOICE ? 'selected' : ''}>👨 裝置中文男聲${speaker.preferredChineseMaleVoice ? ` — ${escapeHtml(speaker.preferredChineseMaleVoice.name)} (${escapeHtml(speaker.preferredChineseMaleVoice.lang)})` : ' — 目前未偵測到'}</option>${speaker.voices.map((voice) => `<option value="${escapeHtml(voice.voiceURI)}" ${voice.voiceURI === eff.voiceURI ? 'selected' : ''}>${escapeHtml(voice.name)} (${voice.lang})</option>`).join('')}</select></label>
-          <p class="setting-hint"><strong>線上 AI 男聲：</strong>所有手機皆可使用，但播放時台詞會傳送到公開的 tts.kina.ink 與 Microsoft 語音服務，且服務可能暫時中斷。裝置語音則不會上傳文字。</p>
+          <p class="setting-hint"><strong>線上 AI 男聲：</strong>會在背景預載目前句與下一句以縮短等待。台詞會傳送到公開的 tts.kina.ink 與 Microsoft 語音服務，且服務可能暫時中斷。裝置語音則不會上傳文字。</p>
           <label>語速 <output>${eff.rate.toFixed(1)}×</output><input id="rate" type="range" min="0.5" max="2" step="0.1" value="${eff.rate}"></label>
           <label>音調 <output>${eff.pitch.toFixed(1)}</output><input id="pitch" type="range" min="0.5" max="2" step="0.1" value="${eff.pitch}"></label>
           <label>文字大小 <output>${eff.fontScale.toFixed(1)}×</output><input id="font-scale" type="range" min="0.8" max="2.0" step="0.1" value="${eff.fontScale}"></label>
@@ -499,6 +517,10 @@ function wireEvents(): void {
       line.text = textarea.value
       script.updatedAt = new Date().toISOString()
       persist()
+      const eff = getEffectiveScriptSettings(script, state.settings)
+      if (eff.voiceURI === PREFERRED_CHINESE_MALE_VOICE) {
+        void speaker.preloadOnlineMale(line.text, eff.rate, eff.pitch).catch(() => undefined)
+      }
     }
   }))
   app.querySelectorAll<HTMLInputElement>('.line-marker-label').forEach((input) => input.addEventListener('change', () => {
