@@ -1,7 +1,11 @@
 export type SpeechStatus = 'stopped' | 'playing'
 
-/** A virtual voice that resolves to a free Chinese male voice installed on the device. */
+/** Online Taiwanese Mandarin male voice. Keeps the old URI so saved selections migrate automatically. */
 export const PREFERRED_CHINESE_MALE_VOICE = 'mic-cue://voice/chinese-male'
+export const PREFERRED_LOCAL_CHINESE_MALE_VOICE = 'mic-cue://voice/local-chinese-male'
+
+const ONLINE_TTS_ENDPOINT = 'https://tts.kina.ink/tts'
+const ONLINE_TTS_VOICE = 'zh-TW-YunJheNeural'
 
 // Web Speech does not expose voice gender. These are the public male voice names
 // used by the major OS/browser vendors, so matching must be name based.
@@ -26,6 +30,7 @@ export class Speaker {
   private currentUtterance: SpeechSynthesisUtterance | null = null
   private keepAliveTimer: number | null = null
   private speakTimeoutId: number | null = null
+  private currentAudio: HTMLAudioElement | null = null
   private lastText = ''
   public onStatusChange: (status: SpeechStatus, message: string) => void = () => undefined
   public onEnd: () => void = () => undefined
@@ -60,6 +65,10 @@ export class Speaker {
       this.onEnd()
       return
     }
+    if (voiceURI === PREFERRED_CHINESE_MALE_VOICE) {
+      this.speakOnlineMale(trimmed, rate, pitch, onEndCallback)
+      return
+    }
     if (typeof speechSynthesis === 'undefined') {
       this.onStatusChange('stopped', '此瀏覽器不支援語音朗讀。')
       return
@@ -73,7 +82,7 @@ export class Speaker {
       const utterance = new SpeechSynthesisUtterance(trimmed)
       utterance.rate = rate
       utterance.pitch = pitch
-      if (voiceURI === PREFERRED_CHINESE_MALE_VOICE) {
+      if (voiceURI === PREFERRED_LOCAL_CHINESE_MALE_VOICE) {
         const maleVoice = this.preferredChineseMaleVoice
         if (!maleVoice) {
           this.onStatusChange('stopped', '目前裝置未提供中文男聲。請先在手機安裝中文男聲，再重新開啟網頁。')
@@ -124,7 +133,7 @@ export class Speaker {
         }
         speechSynthesis.speak(utterance)
         this.startKeepAlive()
-        const voiceMessage = voiceURI === PREFERRED_CHINESE_MALE_VOICE && utterance.voice
+        const voiceMessage = voiceURI === PREFERRED_LOCAL_CHINESE_MALE_VOICE && utterance.voice
           ? `（男聲：${utterance.voice.name}）`
           : ''
         this.onStatusChange('playing', `正在播放${voiceMessage}：${trimmed}`)
@@ -142,6 +151,13 @@ export class Speaker {
       this.speakTimeoutId = null
     }
     this.clearKeepAlive()
+    if (this.currentAudio) {
+      const audio = this.currentAudio
+      this.currentAudio = null
+      audio.pause()
+      audio.removeAttribute('src')
+      audio.load()
+    }
     if (typeof speechSynthesis !== 'undefined') {
       speechSynthesis.cancel()
       if (speechSynthesis.paused) {
@@ -177,6 +193,48 @@ export class Speaker {
 
   private recover(message: string): void {
     this.onStatusChange('stopped', `${message} 已回到待命狀態。`)
+  }
+
+  private speakOnlineMale(text: string, rate: number, pitch: number, onEndCallback?: () => void): void {
+    const ratePercent = Math.round(Math.min(50, Math.max(-50, (rate - 1) * 100)))
+    const pitchHz = Math.round(Math.min(50, Math.max(-50, (pitch - 1) * 50)))
+    const signed = (value: number, suffix: string) => `${value >= 0 ? '+' : ''}${value}${suffix}`
+    const params = new URLSearchParams({
+      text,
+      voice: ONLINE_TTS_VOICE,
+      rate: signed(ratePercent, '%'),
+      volume: '+0%',
+      pitch: signed(pitchHz, 'Hz'),
+      format: 'mp3'
+    })
+
+    const audio = new Audio(`${ONLINE_TTS_ENDPOINT}?${params}`)
+    this.currentAudio = audio
+    audio.preload = 'auto'
+    audio.onplaying = () => {
+      if (this.currentAudio === audio) {
+        this.onStatusChange('playing', `正在播放（線上男聲：雲哲）：${text}`)
+      }
+    }
+    audio.onended = () => {
+      if (this.currentAudio !== audio) return
+      this.currentAudio = null
+      this.onStatusChange('stopped', '播放完成。')
+      onEndCallback?.()
+      this.onEnd()
+    }
+    audio.onerror = () => {
+      if (this.currentAudio !== audio) return
+      this.currentAudio = null
+      this.recover('線上男聲暫時無法播放，請檢查網路或改用裝置語音。')
+    }
+
+    this.onStatusChange('playing', '正在連線取得台灣 AI 男聲「雲哲」…')
+    void audio.play().catch(() => {
+      if (this.currentAudio !== audio) return
+      this.currentAudio = null
+      this.recover('瀏覽器阻擋了線上男聲播放，請再點一次播放。')
+    })
   }
 }
 

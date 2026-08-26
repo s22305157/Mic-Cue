@@ -1,7 +1,7 @@
 import './styles.css'
 import { registerSW } from 'virtual:pwa-register'
 import { calculateBackupDiff, createScriptSnapshot, getEffectiveScriptSettings, getScriptMarkers, loadState, makeId, recordScriptHistory, resetScriptSettings, saveState, setScriptSetting, validateImportedState } from './storage'
-import { PREFERRED_CHINESE_MALE_VOICE, Speaker, type SpeechStatus } from './speech'
+import { PREFERRED_CHINESE_MALE_VOICE, PREFERRED_LOCAL_CHINESE_MALE_VOICE, Speaker, type SpeechStatus } from './speech'
 import type { AppState, BackupDiffSummary, CueLine, Script, ScriptRevision, VoicePreset } from './types'
 
 registerSW({ immediate: true })
@@ -239,8 +239,8 @@ function rehearsalTemplate(script: Script | undefined, current: CueLine | undefi
               <span class="global-badge" title="未個別自訂，使用全站通用預設">🌐 全站預設</span>
             `}
           </div>
-          <label>語音<select id="voice-select"><option value="">系統預設</option><option value="${PREFERRED_CHINESE_MALE_VOICE}" ${eff.voiceURI === PREFERRED_CHINESE_MALE_VOICE ? 'selected' : ''}>👨 中文男聲優先${speaker.preferredChineseMaleVoice ? ` — ${escapeHtml(speaker.preferredChineseMaleVoice.name)} (${escapeHtml(speaker.preferredChineseMaleVoice.lang)})` : ' — 目前裝置未偵測到'}</option>${speaker.voices.map((voice) => `<option value="${escapeHtml(voice.voiceURI)}" ${voice.voiceURI === eff.voiceURI ? 'selected' : ''}>${escapeHtml(voice.name)} (${voice.lang})</option>`).join('')}</select></label>
-          <p class="setting-hint">男聲優先使用裝置或瀏覽器免費提供的公開語音；文字不會上傳。若顯示未偵測到，請先在手機安裝中文男聲後重開網頁。</p>
+          <label>語音<select id="voice-select"><option value="">系統預設</option><option value="${PREFERRED_CHINESE_MALE_VOICE}" ${eff.voiceURI === PREFERRED_CHINESE_MALE_VOICE ? 'selected' : ''}>☁️ 台灣 AI 男聲 — 雲哲（需網路）</option><option value="${PREFERRED_LOCAL_CHINESE_MALE_VOICE}" ${eff.voiceURI === PREFERRED_LOCAL_CHINESE_MALE_VOICE ? 'selected' : ''}>👨 裝置中文男聲${speaker.preferredChineseMaleVoice ? ` — ${escapeHtml(speaker.preferredChineseMaleVoice.name)} (${escapeHtml(speaker.preferredChineseMaleVoice.lang)})` : ' — 目前未偵測到'}</option>${speaker.voices.map((voice) => `<option value="${escapeHtml(voice.voiceURI)}" ${voice.voiceURI === eff.voiceURI ? 'selected' : ''}>${escapeHtml(voice.name)} (${voice.lang})</option>`).join('')}</select></label>
+          <p class="setting-hint"><strong>線上 AI 男聲：</strong>所有手機皆可使用，但播放時台詞會傳送到公開的 tts.kina.ink 與 Microsoft 語音服務，且服務可能暫時中斷。裝置語音則不會上傳文字。</p>
           <label>語速 <output>${eff.rate.toFixed(1)}×</output><input id="rate" type="range" min="0.5" max="2" step="0.1" value="${eff.rate}"></label>
           <label>音調 <output>${eff.pitch.toFixed(1)}</output><input id="pitch" type="range" min="0.5" max="2" step="0.1" value="${eff.pitch}"></label>
           <label>文字大小 <output>${eff.fontScale.toFixed(1)}×</output><input id="font-scale" type="range" min="0.8" max="2.0" step="0.1" value="${eff.fontScale}"></label>
