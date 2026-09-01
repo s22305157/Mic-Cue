@@ -19,6 +19,9 @@ let pendingImportState: AppState | null = null
 let pendingImportDiff: BackupDiffSummary | null = null
 let isScriptHistoryModalOpen = false
 let onlineVoicePreloadTimer: number | null = null
+let screenWakeLock: WakeLockSentinel | null = null
+let isWakeLockRequestPending = false
+let wakeLockStatus: 'inactive' | 'requesting' | 'active' | 'unsupported' | 'failed' = 'inactive'
 
 const speaker = new Speaker()
 const app = document.querySelector<HTMLDivElement>('#app')!
@@ -57,6 +60,68 @@ speaker.onEnd = () => {
 function announce(message: string): void {
   live.textContent = ''
   window.setTimeout(() => { live.textContent = message }, 20)
+}
+
+function wakeLockMessage(): string {
+  if (wakeLockStatus === 'active') return '💡 螢幕常亮已啟用'
+  if (wakeLockStatus === 'requesting') return '💡 正在啟用螢幕常亮…'
+  if (wakeLockStatus === 'unsupported') return '⚠️ 此瀏覽器不支援螢幕常亮，請將裝置的自動鎖定設為「永不」'
+  if (wakeLockStatus === 'failed') return '⚠️ 無法保持螢幕常亮，請確認低耗電模式已關閉'
+  return '💡 螢幕常亮未啟用'
+}
+
+function updateWakeLockStatus(): void {
+  const status = app.querySelector<HTMLElement>('.wake-lock-status')
+  if (status) status.textContent = wakeLockMessage()
+}
+
+async function requestStageWakeLock(): Promise<void> {
+  if (mode !== 'stage' || document.visibilityState !== 'visible' || screenWakeLock || isWakeLockRequestPending) return
+
+  if (!('wakeLock' in navigator)) {
+    wakeLockStatus = 'unsupported'
+    updateWakeLockStatus()
+    announce(wakeLockMessage())
+    return
+  }
+
+  isWakeLockRequestPending = true
+  wakeLockStatus = 'requesting'
+  updateWakeLockStatus()
+
+  try {
+    const sentinel = await navigator.wakeLock.request('screen')
+    if (mode !== 'stage' || document.visibilityState !== 'visible') {
+      await sentinel.release()
+      return
+    }
+
+    screenWakeLock = sentinel
+    wakeLockStatus = 'active'
+    sentinel.addEventListener('release', () => {
+      if (screenWakeLock !== sentinel) return
+      screenWakeLock = null
+      wakeLockStatus = 'inactive'
+      updateWakeLockStatus()
+      if (mode === 'stage' && document.visibilityState === 'visible') void requestStageWakeLock()
+    })
+    updateWakeLockStatus()
+    announce('螢幕常亮已啟用。')
+  } catch {
+    wakeLockStatus = 'failed'
+    updateWakeLockStatus()
+    announce(wakeLockMessage())
+  } finally {
+    isWakeLockRequestPending = false
+  }
+}
+
+function releaseStageWakeLock(): void {
+  const sentinel = screenWakeLock
+  screenWakeLock = null
+  wakeLockStatus = 'inactive'
+  updateWakeLockStatus()
+  if (sentinel) void sentinel.release().catch(() => undefined)
 }
 
 function selectedScript(): Script | undefined {
@@ -422,6 +487,7 @@ function stageTemplate(script: Script | undefined, current: CueLine | undefined,
       <button data-action="exit-stage">離開舞台模式</button>
       <p>${escapeHtml(script?.title ?? 'Mic Cue')}</p>
       <button data-action="toggle-lock" class="lock-button">${isLocked ? `${icon('lock')} 已鎖定` : `${icon('unlock')} 已解鎖`}</button>
+      <span class="wake-lock-status" role="status" aria-live="polite">${wakeLockMessage()}</span>
     </header>
 
     ${script && total > 0 ? `
@@ -447,6 +513,20 @@ function stageTemplate(script: Script | undefined, current: CueLine | undefined,
     <section class="cue-current" aria-label="目前台詞 (大字提示卡)">
       <span>目前句子 ${currentLineIndex + 1} / ${total} ${current?.isMarker ? `<strong style="color:#f9c74f; margin-left:.6rem;">🚩 ${escapeHtml(current.markerLabel || '標記點')}</strong>` : ''}</span>
       <p>${escapeHtml(current?.text || '沒有可播放的台詞')}</p>
+
+      ${eff.rescuePhrases.length > 0 ? `
+        <div class="inline-cue-rescue" aria-label="卡詞即時救援區">
+          <span class="inline-rescue-label">🆘 若卡詞點擊即刻朗讀救援：</span>
+          <div class="inline-rescue-btns">
+            ${eff.rescuePhrases.map((phrase, idx) => `
+              <button class="inline-rescue-btn" data-action="speak-rescue" data-index="${idx}" aria-label="緊急播放救援句：${escapeHtml(phrase)}">
+                <span class="rescue-icon" aria-hidden="true">🆘</span>
+                <span class="rescue-text">${escapeHtml(phrase)}</span>
+              </button>
+            `).join('')}
+          </div>
+        </div>
+      ` : ''}
     </section>
     <section class="cue-next" aria-label="下一句台詞預覽"><span>下一句</span><p>${escapeHtml(next?.text || '已是最後一句')}</p></section>
     <div class="stage-status" role="status" aria-live="polite">${playbackStatus === 'playing' ? '正在播放目前句子' : '已停止播放'}</div>
@@ -458,22 +538,6 @@ function stageTemplate(script: Script | undefined, current: CueLine | undefined,
       <button data-action="next" ${isLocked ? 'disabled' : ''} aria-label="下一句">${icon('next')}<span>下一句</span></button>
     </section>
     ${isLocked ? '<p class="lock-note" role="note">舞台控制已鎖定。按右上角「已鎖定」進行解鎖；停止鍵與救援句隨時可用。</p>' : ''}
-
-    ${eff.rescuePhrases.length > 0 ? `
-      <section class="stage-rescue" aria-label="舞台常用救援句">
-        <div class="stage-rescue-header">
-          <span>🆘 常用救援句</span>
-        </div>
-        <div class="stage-rescue-list">
-          ${eff.rescuePhrases.map((phrase, idx) => `
-            <button class="stage-rescue-btn" data-action="speak-rescue" data-index="${idx}" aria-label="緊急播放救援句：${escapeHtml(phrase)}">
-              <span class="rescue-icon" aria-hidden="true">🆘</span>
-              <span class="rescue-text">${escapeHtml(phrase)}</span>
-            </button>
-          `).join('')}
-        </div>
-      </section>
-    ` : ''}
 
     ${isStageJumpModalOpen ? stageJumpModalTemplate(script) : ''}
   </main>`
@@ -676,8 +740,8 @@ function handleAction(element: HTMLElement): void {
   if (action === 'stop') { isContinuousPlaying = false; speaker.stop(); render(); return }
   if (action === 'previous') { currentLineIndex = Math.max(0, currentLineIndex - 1); render(); scrollToActiveLine(); announce(`上一句，第 ${currentLineIndex + 1} 句`); return }
   if (action === 'next') { currentLineIndex = Math.min(Math.max(0, (script?.lines.length ?? 1) - 1), currentLineIndex + 1); render(); scrollToActiveLine(); announce(`下一句，第 ${currentLineIndex + 1} 句`); return }
-  if (action === 'enter-stage') { mode = 'stage'; isLocked = eff.stageLockOnEntry; isContinuousPlaying = false; isStageJumpModalOpen = false; speaker.stop(false); render(); announce('進入舞台模式'); return }
-  if (action === 'exit-stage') { mode = 'rehearsal'; isStageJumpModalOpen = false; speaker.stop(false); render(); announce('離開舞台模式，回到排練編輯器'); return }
+  if (action === 'enter-stage') { mode = 'stage'; isLocked = eff.stageLockOnEntry; isContinuousPlaying = false; isStageJumpModalOpen = false; speaker.stop(false); render(); announce('進入舞台模式'); void requestStageWakeLock(); return }
+  if (action === 'exit-stage') { mode = 'rehearsal'; isStageJumpModalOpen = false; releaseStageWakeLock(); speaker.stop(false); render(); announce('離開舞台模式，回到排練編輯器'); return }
   if (action === 'toggle-lock') { isLocked = !isLocked; announce(isLocked ? '舞台控制已鎖定。' : '舞台控制已解鎖。'); render(); return }
   if (action === 'speak-rescue') { speaker.speak(eff.rescuePhrases[index] || state.settings.rescuePhrases[index], eff.voiceURI, eff.rate, eff.pitch); return }
   if (action === 'toggle-script-rescue' && script) {
@@ -870,7 +934,11 @@ document.addEventListener('keydown', (event) => {
   if (event.key.toLowerCase() === 'l' && mode === 'stage') { isLocked = !isLocked; render() }
 })
 
+document.addEventListener('visibilitychange', () => {
+  if (mode === 'stage' && document.visibilityState === 'visible') void requestStageWakeLock()
+})
+
+window.addEventListener('pagehide', releaseStageWakeLock)
+
 speechSynthesis.addEventListener('voiceschanged', render)
 render()
-
-

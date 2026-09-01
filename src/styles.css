@@ -643,6 +643,14 @@ input, select, textarea {
   border-color: #dc2626;
 }
 
+.wake-lock-status {
+  flex-basis: 100%;
+  color: #bbf7d0;
+  font-size: 0.9rem;
+  font-weight: 700;
+  text-align: center;
+}
+
 .stage-jump-toolbar {
   display: flex;
   gap: 0.5rem;
