@@ -610,15 +610,15 @@ input, select, textarea {
   max-height: 100dvh;
   min-height: 0;
   display: grid;
-  /* Keep the cue card compact so the primary controls remain large and reachable. */
-  grid-template-rows: auto auto minmax(7.5rem, 35dvh) auto auto auto;
-  gap: clamp(0.8rem, 2vh, 1.3rem);
-  align-content: space-between;
-  overflow: hidden;
+  /* Compact cue rows; all remaining height belongs to the controls. */
+  grid-template-rows: auto auto auto auto auto minmax(5.35rem, 1fr) auto;
+  gap: clamp(0.4rem, 1dvh, 0.75rem);
+  overflow-y: auto;
   padding: max(1rem, env(safe-area-inset-top)) max(1rem, env(safe-area-inset-right)) max(1rem, env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-left));
 }
 
 .stage-header {
+  grid-row: 1;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -657,6 +657,7 @@ input, select, textarea {
 }
 
 .stage-jump-toolbar {
+  grid-row: 2;
   display: flex;
   gap: 0.5rem;
   align-items: center;
@@ -800,11 +801,12 @@ input, select, textarea {
 /* Cue Cards */
 .cue-current, .cue-next {
   border-radius: 1.25rem;
-  padding: clamp(0.9rem, 3vw, 2rem);
+  padding: 0.6rem 0.85rem;
+  max-height: clamp(4rem, 14dvh, 7rem);
 }
 
 .cue-current {
-  display: grid;
+  grid-row: 3;
   min-height: 0;
   align-content: start;
   align-content: safe center;
@@ -817,7 +819,7 @@ input, select, textarea {
 }
 
 .cue-next {
-  max-height: clamp(3.8rem, 12dvh, 6.5rem);
+  grid-row: 4;
   overflow: hidden;
   background: #121215;
   border: 1px solid #3f3f46;
@@ -835,16 +837,15 @@ input, select, textarea {
   font-weight: 800;
 }
 
-.cue-current p {
-  font-size: clamp(2.25rem, calc(5vw * var(--cue-scale)), 6rem);
+.cue-current p, .cue-next p {
+  font-size: clamp(1.35rem, calc(2.8vw * var(--cue-scale)), 3rem);
   font-weight: 800;
   line-height: 1.18;
-  margin-top: 0.7rem;
+  margin: 0.4rem 0 0;
   overflow-wrap: anywhere;
 }
 
 .cue-next p {
-  font-size: clamp(1.35rem, calc(2.8vw * var(--cue-scale)), 3rem);
   color: #e4e4e7;
   margin-top: 0.4rem;
   overflow-wrap: anywhere;
@@ -855,14 +856,16 @@ input, select, textarea {
 }
 
 .stage-status {
+  grid-row: 5;
   text-align: center;
   font-weight: 700;
   color: #fde047;
 }
 
 .stage-controls {
+  grid-row: 6;
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 0.65rem;
   position: relative;
   z-index: 2;
@@ -873,7 +876,10 @@ input, select, textarea {
   display: grid;
   place-items: center;
   gap: 0.3rem;
-  min-height: 6.75rem;
+  min-height: 5.35rem;
+  min-width: 0;
+  align-content: center;
+  padding: 0.5rem 0.2rem;
   background: #27272a;
   color: white;
   font-size: 2.15rem;
@@ -890,6 +896,8 @@ input, select, textarea {
 }
 
 .lock-note {
+  grid-row: 7;
+  margin: 0;
   text-align: center;
   color: #fde047;
 }
@@ -1099,20 +1107,7 @@ input, select, textarea {
 /* Mobile Responsiveness (<900px) */
 @media (max-width: 900px) {
   .stage-shell {
-    grid-template-rows: auto auto minmax(7rem, 35dvh) auto auto auto;
-    gap: clamp(0.55rem, 1.5vh, 0.85rem);
-  }
-
-  .cue-current, .cue-next {
-    padding: clamp(0.75rem, 3vw, 1.2rem);
-  }
-
-  .cue-current p {
-    margin-top: 0.4rem;
-  }
-
-  .cue-next {
-    max-height: clamp(3.4rem, 10dvh, 5rem);
+    gap: clamp(0.35rem, 0.8dvh, 0.6rem);
   }
 
   .layout {
@@ -1139,7 +1134,7 @@ input, select, textarea {
   }
 
   .stage-controls {
-    grid-template-columns: repeat(5, 1fr);
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 0.4rem;
   }
 
