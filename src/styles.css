@@ -610,8 +610,10 @@ input, select, textarea {
   max-height: 100dvh;
   min-height: 0;
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto auto auto;
+  /* Keep the cue card compact so the primary controls remain large and reachable. */
+  grid-template-rows: auto auto minmax(7.5rem, 35dvh) auto auto auto;
   gap: clamp(0.8rem, 2vh, 1.3rem);
+  align-content: space-between;
   overflow: hidden;
   padding: max(1rem, env(safe-area-inset-top)) max(1rem, env(safe-area-inset-right)) max(1rem, env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-left));
 }
@@ -798,7 +800,7 @@ input, select, textarea {
 /* Cue Cards */
 .cue-current, .cue-next {
   border-radius: 1.25rem;
-  padding: clamp(1.2rem, 4vw, 3rem);
+  padding: clamp(0.9rem, 3vw, 2rem);
 }
 
 .cue-current {
@@ -815,7 +817,7 @@ input, select, textarea {
 }
 
 .cue-next {
-  max-height: clamp(4.5rem, 16dvh, 9rem);
+  max-height: clamp(3.8rem, 12dvh, 6.5rem);
   overflow: hidden;
   background: #121215;
   border: 1px solid #3f3f46;
@@ -871,15 +873,15 @@ input, select, textarea {
   display: grid;
   place-items: center;
   gap: 0.3rem;
-  min-height: 5.5rem;
+  min-height: 6.75rem;
   background: #27272a;
   color: white;
-  font-size: 1.8rem;
+  font-size: 2.15rem;
   border: 1px solid #3f3f46;
 }
 
 .stage-controls button span {
-  font-size: 0.9rem;
+  font-size: 1rem;
 }
 
 .stage-controls .stage-play {
@@ -1096,6 +1098,23 @@ input, select, textarea {
 
 /* Mobile Responsiveness (<900px) */
 @media (max-width: 900px) {
+  .stage-shell {
+    grid-template-rows: auto auto minmax(7rem, 35dvh) auto auto auto;
+    gap: clamp(0.55rem, 1.5vh, 0.85rem);
+  }
+
+  .cue-current, .cue-next {
+    padding: clamp(0.75rem, 3vw, 1.2rem);
+  }
+
+  .cue-current p {
+    margin-top: 0.4rem;
+  }
+
+  .cue-next {
+    max-height: clamp(3.4rem, 10dvh, 5rem);
+  }
+
   .layout {
     grid-template-columns: 1fr;
     padding: 0.75rem;
@@ -1125,11 +1144,11 @@ input, select, textarea {
   }
 
   .stage-controls button {
-    min-height: 4.2rem;
-    font-size: 1.4rem;
+    min-height: 5.35rem;
+    font-size: 1.7rem;
   }
 
   .stage-controls button span {
-    font-size: 0.75rem;
+    font-size: 0.85rem;
   }
 }
