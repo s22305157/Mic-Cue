@@ -1,8 +1,12 @@
+import { AudioOutput } from './audio-output'
+
 export type SpeechStatus = 'stopped' | 'playing'
 
 /** Online Taiwanese Mandarin male voice. Keeps the old URI so saved selections migrate automatically. */
 export const PREFERRED_CHINESE_MALE_VOICE = 'mic-cue://voice/chinese-male'
 export const PREFERRED_LOCAL_CHINESE_MALE_VOICE = 'mic-cue://voice/local-chinese-male'
+export const OFFLINE_CHINESE_MALE_VOICE = 'mic-cue://voice/offline-chinese-male'
+export const AUDIO_CACHE_NAME = 'mic-cue-male-audio-v1'
 
 const ONLINE_TTS_ENDPOINT = 'https://tts.kina.ink/tts'
 const ONLINE_TTS_VOICE = 'zh-TW-YunJheNeural'
@@ -26,6 +30,7 @@ function normalizedVoiceLabel(voice: SpeechSynthesisVoice): string {
 }
 
 export class Speaker {
+  public readonly output = new AudioOutput()
   private activeUtterances: Set<SpeechSynthesisUtterance> = new Set()
   private currentUtterance: SpeechSynthesisUtterance | null = null
   private keepAliveTimer: number | null = null
@@ -34,6 +39,64 @@ export class Speaker {
   private onlineAudioCache = new Map<string, string>()
   private onlineAudioRequests = new Map<string, Promise<string>>()
   private lastText = ''
+  private playbackGeneration = 0
+
+  async prepareOfflineMale(text: string, rate: number, pitch: number): Promise<Blob> {
+    const cache = await caches.open(AUDIO_CACHE_NAME)
+    const url = this.onlineMaleUrl(text.trim(), rate, pitch)
+    const saved = await cache.match(url)
+    if (saved) return saved.blob()
+    const response = await fetch(url, { signal: AbortSignal.timeout(60000) })
+    if (!response.ok) throw new Error(`語音服務回應 ${response.status}`)
+    const blob = await response.blob()
+    if (!blob.size || !blob.type.startsWith('audio/')) throw new Error('服務未回傳有效音檔')
+    await cache.put(url, new Response(blob, { headers: { 'Content-Type': blob.type } }))
+    return blob
+  }
+
+  private async speakOfflineMale(text: string, rate: number, pitch: number, onEndCallback?: () => void): Promise<void> {
+    const generation = this.playbackGeneration
+    try {
+      const cache = await caches.open(AUDIO_CACHE_NAME)
+      const response = await cache.match(this.onlineMaleUrl(text, rate, pitch))
+      if (!response) throw new Error('這句台詞尚未下載，或語速／音調已變更。請連網重新產生音檔包。')
+      const blob = await response.blob()
+      if (generation !== this.playbackGeneration) return
+      const url = URL.createObjectURL(blob)
+      const audio = new Audio(url)
+      this.currentAudio = audio
+      const boosted = this.output.attach(audio)
+      const cleanup = () => URL.revokeObjectURL(url)
+      audio.onemptied = cleanup
+      audio.onended = () => {
+        cleanup()
+        if (this.currentAudio !== audio) return
+        this.output.disconnect()
+        this.currentAudio = null
+        this.onStatusChange('stopped', '播放完成。')
+        onEndCallback?.()
+        this.onEnd()
+      }
+      audio.onerror = () => {
+        cleanup()
+        if (this.currentAudio !== audio) return
+        this.output.disconnect()
+        this.currentAudio = null
+        this.recover('離線音檔無法播放，請重新產生音檔包。')
+      }
+      await audio.play().catch(() => {
+        cleanup()
+        if (this.currentAudio === audio) {
+          this.output.disconnect()
+          this.currentAudio = null
+          this.recover('請再點一次播放以啟動離線音檔。')
+        }
+      })
+      if (this.currentAudio === audio) this.onStatusChange('playing', `正在播放（離線雲哲，${boosted ? '音量增強' : '原始音量'}）：${text}`)
+    } catch (error) {
+      if (generation === this.playbackGeneration) this.recover(error instanceof Error ? error.message : '無法讀取離線音檔。')
+    }
+  }
   public onStatusChange: (status: SpeechStatus, message: string) => void = () => undefined
   public onEnd: () => void = () => undefined
 
@@ -76,7 +139,20 @@ export class Speaker {
       return
     }
     if (voiceURI === PREFERRED_CHINESE_MALE_VOICE) {
-      this.speakOnlineMale(trimmed, rate, pitch, onEndCallback)
+      const generation = this.playbackGeneration
+      const ready = this.output.unlock()
+      void this.preloadOnlineMale(trimmed, rate, pitch).catch(() => undefined).then(async () => {
+        await ready
+        if (generation === this.playbackGeneration) this.speakOnlineMale(trimmed, rate, pitch, onEndCallback)
+      })
+      this.onStatusChange('playing', '正在準備男聲音檔…')
+      return
+    }
+    if (voiceURI === OFFLINE_CHINESE_MALE_VOICE) {
+      const generation = this.playbackGeneration
+      void this.output.unlock().then(() => {
+        if (generation === this.playbackGeneration) return this.speakOfflineMale(trimmed, rate, pitch, onEndCallback)
+      })
       return
     }
     if (typeof speechSynthesis === 'undefined') {
@@ -156,6 +232,8 @@ export class Speaker {
   }
 
   stop(announce = true): void {
+    this.playbackGeneration++
+    this.output.disconnect()
     if (this.speakTimeoutId !== null) {
       window.clearTimeout(this.speakTimeoutId)
       this.speakTimeoutId = null
@@ -210,14 +288,16 @@ export class Speaker {
     const cachedAudioUrl = this.onlineAudioCache.get(key)
     const audio = new Audio(cachedAudioUrl ?? this.onlineMaleUrl(text, rate, pitch))
     this.currentAudio = audio
+    const boosted = cachedAudioUrl ? this.output.attach(audio) : false
     audio.preload = 'auto'
     audio.onplaying = () => {
       if (this.currentAudio === audio) {
-        this.onStatusChange('playing', `正在播放（線上男聲：雲哲${cachedAudioUrl ? '，已預載' : ''}）：${text}`)
+        this.onStatusChange('playing', `正在播放（線上男聲：雲哲，${boosted ? '音量增強' : '原始音量'}）：${text}`)
       }
     }
     audio.onended = () => {
       if (this.currentAudio !== audio) return
+      this.output.disconnect()
       this.currentAudio = null
       this.onStatusChange('stopped', '播放完成。')
       onEndCallback?.()
@@ -225,6 +305,7 @@ export class Speaker {
     }
     audio.onerror = () => {
       if (this.currentAudio !== audio) return
+      this.output.disconnect()
       this.currentAudio = null
       this.recover('線上男聲暫時無法播放，請檢查網路或改用裝置語音。')
     }
@@ -232,6 +313,7 @@ export class Speaker {
     this.onStatusChange('playing', cachedAudioUrl ? '正在播放已預載的台灣 AI 男聲「雲哲」…' : '正在連線取得台灣 AI 男聲「雲哲」…')
     void audio.play().catch(() => {
       if (this.currentAudio !== audio) return
+      this.output.disconnect()
       this.currentAudio = null
       this.recover('瀏覽器阻擋了線上男聲播放，請再點一次播放。')
     })
@@ -261,7 +343,7 @@ export class Speaker {
     const existing = this.onlineAudioRequests.get(key)
     if (existing) return existing
 
-    const request = fetch(this.onlineMaleUrl(text, rate, pitch))
+    const request = fetch(this.onlineMaleUrl(text, rate, pitch), { signal: AbortSignal.timeout(15000) })
       .then((response) => {
         if (!response.ok) throw new Error(`TTS preload failed: ${response.status}`)
         return response.blob()

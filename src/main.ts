@@ -1,7 +1,8 @@
+import { makeAudioZip } from './audio-package'
 import './styles.css'
 import { registerSW } from 'virtual:pwa-register'
 import { calculateBackupDiff, createScriptSnapshot, getEffectiveScriptSettings, getScriptMarkers, loadState, makeId, recordScriptHistory, resetScriptSettings, saveState, setScriptSetting, validateImportedState } from './storage'
-import { PREFERRED_CHINESE_MALE_VOICE, PREFERRED_LOCAL_CHINESE_MALE_VOICE, Speaker, type SpeechStatus } from './speech'
+import { AUDIO_CACHE_NAME, OFFLINE_CHINESE_MALE_VOICE, PREFERRED_CHINESE_MALE_VOICE, PREFERRED_LOCAL_CHINESE_MALE_VOICE, Speaker, type SpeechStatus } from './speech'
 import type { AppState, BackupDiffSummary, CueLine, Script, ScriptRevision, VoicePreset } from './types'
 
 registerSW({ immediate: true })
@@ -18,6 +19,10 @@ let isImportPreviewModalOpen = false
 let pendingImportState: AppState | null = null
 let pendingImportDiff: BackupDiffSummary | null = null
 let isScriptHistoryModalOpen = false
+let audioPackageBusy = false
+let audioPackageProgress = ''
+let audioPackageUrl = ''
+let audioPackageName = ''
 let onlineVoicePreloadTimer: number | null = null
 let screenWakeLock: WakeLockSentinel | null = null
 let isWakeLockRequestPending = false
@@ -322,8 +327,13 @@ function rehearsalTemplate(script: Script | undefined, current: CueLine | undefi
               <span class="global-badge" title="未個別自訂，使用全站通用預設">🌐 全站預設</span>
             `}
           </div>
-          <label>語音<select id="voice-select"><option value="">系統預設</option><option value="${PREFERRED_CHINESE_MALE_VOICE}" ${eff.voiceURI === PREFERRED_CHINESE_MALE_VOICE ? 'selected' : ''}>☁️ 台灣 AI 男聲 — 雲哲（需網路）</option><option value="${PREFERRED_LOCAL_CHINESE_MALE_VOICE}" ${eff.voiceURI === PREFERRED_LOCAL_CHINESE_MALE_VOICE ? 'selected' : ''}>👨 裝置中文男聲${speaker.preferredChineseMaleVoice ? ` — ${escapeHtml(speaker.preferredChineseMaleVoice.name)} (${escapeHtml(speaker.preferredChineseMaleVoice.lang)})` : ' — 目前未偵測到'}</option>${speaker.voices.map((voice) => `<option value="${escapeHtml(voice.voiceURI)}" ${voice.voiceURI === eff.voiceURI ? 'selected' : ''}>${escapeHtml(voice.name)} (${voice.lang})</option>`).join('')}</select></label>
+          <label>語音<select id="voice-select"><option value="">系統預設</option><option value="${PREFERRED_CHINESE_MALE_VOICE}" ${eff.voiceURI === PREFERRED_CHINESE_MALE_VOICE ? 'selected' : ''}>☁️ 台灣 AI 男聲 — 雲哲（需網路）</option><option value="${OFFLINE_CHINESE_MALE_VOICE}" ${eff.voiceURI === OFFLINE_CHINESE_MALE_VOICE ? 'selected' : ''}>📦 離線雲哲（需先產生音檔包）</option><option value="${PREFERRED_LOCAL_CHINESE_MALE_VOICE}" ${eff.voiceURI === PREFERRED_LOCAL_CHINESE_MALE_VOICE ? 'selected' : ''}>👨 裝置中文男聲${speaker.preferredChineseMaleVoice ? ` — ${escapeHtml(speaker.preferredChineseMaleVoice.name)} (${escapeHtml(speaker.preferredChineseMaleVoice.lang)})` : ' — 目前未偵測到'}</option>${speaker.voices.map((voice) => `<option value="${escapeHtml(voice.voiceURI)}" ${voice.voiceURI === eff.voiceURI ? 'selected' : ''}>${escapeHtml(voice.name)} (${voice.lang})</option>`).join('')}</select></label>
+          <div class="top-actions"><button data-action="prepare-audio" ${audioPackageBusy || !script ? 'disabled' : ''}>${audioPackageBusy ? '正在產生音檔…' : '產生本腳本離線男聲音檔包'}</button>${audioPackageUrl ? `<a class="button-like" href="${audioPackageUrl}" download="${escapeHtml(audioPackageName)}">下載 MP3 ZIP 音檔包</a>` : ''}</div>
+          <p class="setting-hint" role="status">${escapeHtml(audioPackageProgress)}</p>
+          <p class="setting-hint">先連網產生整份台詞與救援句，再選「離線雲哲」即可斷網播放。變更文字、語速或音調需重新產生。ZIP 解壓後可直接播放 MP3；本機音檔可能因清除網站資料或儲存空間不足而消失，請保留 ZIP。JSON 備份不含音檔。</p>
           <p class="setting-hint"><strong>線上 AI 男聲：</strong>會在背景預載目前句與下一句以縮短等待。台詞會傳送到公開的 tts.kina.ink 與 Microsoft 語音服務，且服務可能暫時中斷。裝置語音則不會上傳文字。</p>
+          <label>男聲音量增強 <output id="playback-gain-value">${speaker.output.boost.toFixed(1)}×</output><input id="playback-gain" type="range" min="1" max="3" step="0.1" value="${speaker.output.boost}"></label>
+          <p class="setting-hint">適用於 Mic Cue 內的線上與離線雲哲，1× 為原始音量，預設 2× 增益；不是聽感音量倍數。過大時請調低。裝置語音及匯出 MP3 不受影響；無法啟用增強時會以原始音量播放。</p>
           <label>語速 <output>${eff.rate.toFixed(1)}×</output><input id="rate" type="range" min="0.5" max="2" step="0.1" value="${eff.rate}"></label>
           <label>音調 <output>${eff.pitch.toFixed(1)}</output><input id="pitch" type="range" min="0.5" max="2" step="0.1" value="${eff.pitch}"></label>
           <label>文字大小 <output>${eff.fontScale.toFixed(1)}×</output><input id="font-scale" type="range" min="0.8" max="2.0" step="0.1" value="${eff.fontScale}"></label>
@@ -647,6 +657,11 @@ function wireEvents(): void {
   }
 
   bindSetting('voice-select', (value) => { setScriptSetting(selectedScript(), state.settings, 'voiceURI', value) })
+  app.querySelector<HTMLInputElement>('#playback-gain')?.addEventListener('input', (event) => {
+    speaker.output.boost = Number((event.target as HTMLInputElement).value)
+    const output = app.querySelector('#playback-gain-value')
+    if (output) output.textContent = `${speaker.output.boost.toFixed(1)}×`
+  })
   bindSetting('rate', (value) => { setScriptSetting(selectedScript(), state.settings, 'rate', Number(value)) })
   bindSetting('pitch', (value) => { setScriptSetting(selectedScript(), state.settings, 'pitch', Number(value)) })
   bindSetting('font-scale', (value) => { setScriptSetting(selectedScript(), state.settings, 'fontScale', Number(value)) })
@@ -689,7 +704,7 @@ function handleAction(element: HTMLElement): void {
     if ('caches' in window) {
       caches.keys().then((keys) => {
         for (const key of keys) {
-          caches.delete(key)
+          key !== AUDIO_CACHE_NAME && caches.delete(key)
         }
       })
     }
@@ -768,6 +783,7 @@ function handleAction(element: HTMLElement): void {
     render()
     return
   }
+  if (action === 'prepare-audio') { void prepareAudioPackage(); return }
   if (action === 'export') exportJson()
   
   if (action === 'reset-script-settings' && script) {
@@ -853,6 +869,43 @@ function handleAction(element: HTMLElement): void {
     render()
     announce(`已成功合併匯入 ${newScriptsFromBackup.length} 份新腳本！`)
     return
+  }
+}
+
+async function prepareAudioPackage(): Promise<void> {
+  const script = selectedScript()
+  if (!script || audioPackageBusy) return
+  const snapshot = structuredClone(script)
+  const eff = { ...getEffectiveScriptSettings(script, state.settings) }
+  const entries = [
+    ...snapshot.lines.map((line, index) => ({ text: line.text.trim(), file: `${String(index + 1).padStart(4, '0')}.mp3` })),
+    ...eff.rescuePhrases.map((text, index) => ({ text: text.trim(), file: `rescue-${String(index + 1).padStart(3, '0')}.mp3` }))
+  ].filter((entry) => entry.text)
+  if (!entries.length) { announce('請先新增台詞。'); return }
+  audioPackageBusy = true
+  if (audioPackageUrl) URL.revokeObjectURL(audioPackageUrl)
+  audioPackageUrl = ''
+  const files: { name: string; blob: Blob }[] = []
+  try {
+    for (const [index, entry] of entries.entries()) {
+      audioPackageProgress = `「${snapshot.title}」：正在產生 ${index + 1} / ${entries.length}。請保持網頁開啟。`
+      render()
+      files.push({ name: entry.file, blob: await speaker.prepareOfflineMale(entry.text, eff.rate, eff.pitch) })
+    }
+    files.push({ name: '台詞對照表.txt', blob: new Blob([
+      `${snapshot.title}\n雲哲；語速 ${eff.rate}；音調 ${eff.pitch}\n\n`,
+      entries.map((entry) => `${entry.file}\n${entry.text}`).join('\n\n')
+    ], { type: 'text/plain;charset=utf-8' }) })
+    files.push({ name: 'manifest.json', blob: new Blob([JSON.stringify({ version: 1, voice: 'zh-TW-YunJheNeural', title: snapshot.title, rate: eff.rate, pitch: eff.pitch, entries }, null, 2)], { type: 'application/json' }) })
+    audioPackageUrl = URL.createObjectURL(await makeAudioZip(files))
+    audioPackageName = `${snapshot.title.replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_').slice(0, 80) || 'mic-cue'}-雲哲.zip`
+    audioPackageProgress = `「${snapshot.title}」${entries.length} 句已儲存於本機。請下載 ZIP 備份，並選擇「離線雲哲」播放。`
+  } catch (error) {
+    audioPackageProgress = `產生未完成（已完成 ${files.length} / ${entries.length}）：${error instanceof Error ? error.message : '發生錯誤'}。已儲存音檔可保留，下次重試會接續產生。`
+  } finally {
+    audioPackageBusy = false
+    render()
+    announce(audioPackageProgress)
   }
 }
 
