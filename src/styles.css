@@ -3,6 +3,8 @@
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   color: #0f172a;
   background: #f8fafc;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 * {
@@ -42,6 +44,7 @@ button, input, select, textarea {
 }
 
 button, .button-like {
+  touch-action: manipulation;
   border: 0;
   border-radius: 0.75rem;
   padding: 0.65rem 0.9rem;
@@ -605,13 +608,22 @@ input, select, textarea {
   min-height: 100dvh;
 }
 
+/* Allow scrolling, but avoid accidental page zoom during stage operation.
+   Apply to nested scroll areas as touch-action is not inherited. */
+.stage-mode, .stage-mode * {
+  touch-action: pan-x pan-y;
+}
+
 .stage-shell {
+  width: 100%;
+  min-width: 0;
   height: 100dvh;
   max-height: 100dvh;
   min-height: 0;
   display: grid;
   /* Compact cue rows; all remaining height belongs to the controls. */
   grid-template-rows: auto auto auto auto auto minmax(5.35rem, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
   gap: clamp(0.4rem, 1dvh, 0.75rem);
   overflow-y: auto;
   padding: max(1rem, env(safe-area-inset-top)) max(1rem, env(safe-area-inset-right)) max(1rem, env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-left));
@@ -627,6 +639,9 @@ input, select, textarea {
 }
 
 .stage-header p {
+  min-width: 0;
+  max-width: 100%;
+  flex: 1 1 5rem;
   text-align: center;
   color: #e2e8f0;
   font-weight: 700;
@@ -666,6 +681,9 @@ input, select, textarea {
 }
 
 .stage-jump-toolbar button {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
   min-height: 3rem;
   padding: 0.4rem 0.9rem;
   background: #18181b;
@@ -1106,6 +1124,13 @@ input, select, textarea {
 
 /* Mobile Responsiveness (<900px) */
 @media (max-width: 900px) {
+  /* Keep focused form fields at least 16px on mobile Safari. */
+  .app input, .app select, .app textarea {
+    font-size: max(16px, 1rem);
+    min-width: 0;
+    max-width: 100%;
+  }
+
   .stage-shell {
     gap: clamp(0.35rem, 0.8dvh, 0.6rem);
   }
